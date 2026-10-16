@@ -22,5 +22,3 @@ binding = "DB"
 database_name = "cache"
 database_id = "__D1_ID__"
 
-[observability]
-enabled = true
