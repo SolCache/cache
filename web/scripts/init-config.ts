@@ -3,7 +3,7 @@
 // Also tops up the keeper with a little SOL for transaction fees if it's low.
 import bs58 from "bs58";
 import {
-  Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction,
+  ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionMessage, VersionedTransaction,
 } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
 import {
@@ -18,13 +18,30 @@ const keeper = new PublicKey(readFileSync("../deploy/keeper-pubkey.txt", "utf8")
 const topUpSol = Number(process.env.KEEPER_TOPUP_SOL ?? "0.03");
 
 async function send(ixs: any[], label: string) {
-  const { blockhash } = await conn.getLatestBlockhash();
-  const msg = new TransactionMessage({ payerKey: admin.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message();
-  const tx = new VersionedTransaction(msg);
-  tx.sign([admin]);
-  const sig = await conn.sendTransaction(tx, { maxRetries: 5 });
-  await conn.confirmTransaction(sig, "confirmed");
-  console.log(`${label}: https://solscan.io/tx/${sig}`);
+  // Priority fee so the transaction lands when the network is busy; resend until confirmed or the blockhash expires.
+  const priority = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 200_000 });
+  const limit = ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash("confirmed");
+    const msg = new TransactionMessage({ payerKey: admin.publicKey, recentBlockhash: blockhash, instructions: [limit, priority, ...ixs] }).compileToV0Message();
+    const tx = new VersionedTransaction(msg);
+    tx.sign([admin]);
+    const raw = tx.serialize();
+    const sig = await conn.sendRawTransaction(raw, { maxRetries: 0 });
+    console.log(`${label}: sent ${sig} (attempt ${attempt})`);
+    while ((await conn.getBlockHeight("confirmed")) <= lastValidBlockHeight) {
+      const st = (await conn.getSignatureStatuses([sig])).value[0];
+      if (st?.err) throw new Error(`${label} failed: ${JSON.stringify(st.err)}`);
+      if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") {
+        console.log(`${label}: confirmed https://solscan.io/tx/${sig}`);
+        return sig;
+      }
+      await conn.sendRawTransaction(raw, { maxRetries: 0, skipPreflight: true }).catch(() => {});
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    console.log(`${label}: blockhash expired without confirmation, retrying`);
+  }
+  throw new Error(`${label}: not confirmed after 3 attempts`);
 }
 
 async function main() {
