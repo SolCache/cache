@@ -81,7 +81,8 @@ async function main() {
 
   const bal = await conn.getBalance(keeper);
   console.log(`Keeper balance: ${(bal / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
-  if (bal < 0.01 * LAMPORTS_PER_SOL && topUpSol > 0) {
+  // An explicit amount from the workflow always sends; otherwise only refill a nearly empty keeper.
+  if (topUpSol > 0 && (process.env.KEEPER_TOPUP_SOL || bal < 0.01 * LAMPORTS_PER_SOL)) {
     await send([SystemProgram.transfer({ fromPubkey: admin.publicKey, toPubkey: keeper, lamports: Math.round(topUpSol * LAMPORTS_PER_SOL) })], `Keeper top-up ${topUpSol} SOL`);
   }
 }
