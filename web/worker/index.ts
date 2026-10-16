@@ -124,7 +124,7 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
     await env.DB.prepare("UPDATE users SET last_sweep_request = ? WHERE wallet = ?").bind(now(), wallet).run();
     await syncTrades(env, wallet);
     const result = await sweepWallet(env, wallet);
-    return json({ result, state: await walletState(env, wallet) });
+    return json({ result, state: await walletState(env, wallet, false) });
   }
 
   if (p === "/api/health") {
@@ -140,7 +140,7 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
 
 // ---------------------------------------------------------------- state
 
-async function walletState(env: Env, wallet: string) {
+async function walletState(env: Env, wallet: string, reconcile = true) {
   const programId = new PublicKey(env.PROGRAM_ID);
   const owner = new PublicKey(wallet);
   const [vaultAcc, usdcAcc] = await getAccounts(env, [vaultPda(programId, owner), ata(owner, USDC_MINT)]);
@@ -149,7 +149,7 @@ async function walletState(env: Env, wallet: string) {
   const user = await env.DB.prepare("SELECT * FROM users WHERE wallet = ?").bind(wallet).first<any>();
   const trades = await env.DB.prepare("SELECT * FROM trades WHERE wallet = ? ORDER BY ts DESC LIMIT 50").bind(wallet).all();
   const sweeps = await env.DB.prepare("SELECT * FROM sweeps WHERE wallet = ? ORDER BY ts DESC LIMIT 25").bind(wallet).all();
-  const pending = user ? await pendingUsd(env, wallet) : 0;
+  const pending = user ? await pendingUsd(env, wallet, reconcile) : 0;
   const vaultKey = vaultPda(programId, owner);
   return {
     registered: !!user,
@@ -175,22 +175,27 @@ async function walletState(env: Env, wallet: string) {
   };
 }
 
-/** Re-checks sweeps that were sent but not yet confirmed; a dropped transaction stops counting against pending. */
+/** Re-checks sweeps that were sent but not yet confirmed. A transaction the network dropped stops counting against pending. */
 async function reconcileSent(env: Env, wallet: string) {
-  const sent = await env.DB.prepare("SELECT id, sig, ts FROM sweeps WHERE wallet = ? AND status = 'sent' AND sig IS NOT NULL").bind(wallet).all<{ id: number; sig: string; ts: number }>();
+  const sent = await env.DB.prepare("SELECT id, sig, ts, lvbh FROM sweeps WHERE wallet = ? AND status = 'sent' AND sig IS NOT NULL").bind(wallet).all<{ id: number; sig: string; ts: number; lvbh: number | null }>();
   const rows = sent.results ?? [];
   if (!rows.length) return;
-  const r = await rpc(env, "getSignatureStatuses", [rows.map((s) => s.sig), { searchTransactionHistory: true }]);
+  const [r, height] = await Promise.all([
+    rpc(env, "getSignatureStatuses", [rows.map((s) => s.sig), { searchTransactionHistory: true }]),
+    rpc(env, "getBlockHeight", [{ commitment: "confirmed" }]),
+  ]);
   for (let i = 0; i < rows.length; i++) {
     const s = r.value?.[i];
     if (s?.err) await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = 'Transaction failed onchain' WHERE id = ?").bind(rows[i].id).run();
     else if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(rows[i].id).run();
-    else if (!s && now() - rows[i].ts > 180) await env.DB.prepare("UPDATE sweeps SET status = 'expired', error = 'Transaction did not land; it will be retried' WHERE id = ?").bind(rows[i].id).run();
+    else if (!s && ((rows[i].lvbh && height > rows[i].lvbh) || now() - rows[i].ts > 180)) {
+      await env.DB.prepare("UPDATE sweeps SET status = 'expired', error = 'Dropped by the network before it landed. Nothing moved; these round-ups go into the next sweep.' WHERE id = ?").bind(rows[i].id).run();
+    }
   }
 }
 
-async function pendingUsd(env: Env, wallet: string) {
-  await reconcileSent(env, wallet);
+async function pendingUsd(env: Env, wallet: string, reconcile = true) {
+  if (reconcile) await reconcileSent(env, wallet);
   const t = await env.DB.prepare("SELECT COALESCE(SUM(roundup_usd), 0) AS s FROM trades WHERE wallet = ?").bind(wallet).first<{ s: number }>();
   const s = await env.DB.prepare("SELECT COALESCE(SUM(amount_usd), 0) AS s FROM sweeps WHERE wallet = ? AND status IN ('sent','confirmed')").bind(wallet).first<{ s: number }>();
   return Math.max(0, Math.round(((t?.s ?? 0) - (s?.s ?? 0)) * 100) / 100);
@@ -203,6 +208,8 @@ type HeliusTx = {
   transactionError: any;
   accountData: { account: string; nativeBalanceChange: number; tokenBalanceChanges: { userAccount: string; mint: string; rawTokenAmount: { tokenAmount: string; decimals: number } }[] }[];
 };
+
+const QUOTE_SYMBOLS: Record<string, string> = { [SOL]: "SOL", [USDC_MINT.toBase58()]: "USDC", [USDT_MINT.toBase58()]: "USDT" };
 
 /** Pulls the wallet's recent swaps from Helius and records a round-up for each new one. */
 async function syncTrades(env: Env, wallet: string, opts: { baselineOnly?: boolean } = {}) {
@@ -218,29 +225,49 @@ async function syncTrades(env: Env, wallet: string, opts: { baselineOnly?: boole
 
   const fresh = txs.filter((t) => !t.transactionError && t.timestamp >= user.created_at && t.feePayer === wallet);
   if (!fresh.length) return;
-  const known = await env.DB.prepare(`SELECT sig FROM trades WHERE sig IN (${fresh.map(() => "?").join(",")})`)
-    .bind(...fresh.map((t) => t.signature)).all<{ sig: string }>();
-  const seen = new Set((known.results ?? []).map((k) => k.sig));
-  const todo = fresh.filter((t) => !seen.has(t.signature));
-  if (!todo.length) return;
+  const known = await env.DB.prepare(`SELECT sig, description FROM trades WHERE sig IN (${fresh.map(() => "?").join(",")})`)
+    .bind(...fresh.map((t) => t.signature)).all<{ sig: string; description: string }>();
+  const knownDesc = new Map((known.results ?? []).map((k) => [k.sig, k.description ?? ""]));
+  const todo = fresh.filter((t) => !knownDesc.has(t.signature));
+  const relabel = fresh.filter((t) => knownDesc.has(t.signature) && !/^\$|→/.test(knownDesc.get(t.signature)!));
+  if (!todo.length && !relabel.length) return;
 
-  const vaultAcc = await getAccount(env, vaultPda(new PublicKey(env.PROGRAM_ID), new PublicKey(wallet)));
-  if (!vaultAcc) return;
-  const vault = decodeVault(vaultAcc.data);
-  if (vault.paused) return;
+  let multiplier = 1;
+  if (todo.length) {
+    const vaultAcc = await getAccount(env, vaultPda(new PublicKey(env.PROGRAM_ID), new PublicKey(wallet)));
+    if (!vaultAcc) return;
+    const vault = decodeVault(vaultAcc.data);
+    if (vault.paused) return;
+    multiplier = vault.multiplier;
+  }
 
-  for (const tx of todo) {
-    const value = await tradeValueUsd(env, tx, wallet);
+  // One symbol lookup and one price lookup for the whole batch keeps Cloudflare's per-request call budget low.
+  const parsed = [...todo, ...relabel].map((tx) => ({ tx, changes: walletChanges(tx, wallet) }));
+  const symbolMints = new Set<string>();
+  const priceMints = new Set<string>();
+  for (const { tx, changes } of parsed) {
+    for (const m of changes.keys()) if (!QUOTE_SYMBOLS[m]) symbolMints.add(m);
+    if (todo.includes(tx)) { const pm = priceMintFor(changes); if (pm) priceMints.add(pm); }
+  }
+  const [syms, pxs] = await Promise.all([symbols(env, [...symbolMints]), priceMints.size ? prices(env, [...priceMints]) : Promise.resolve({} as Record<string, number>)]);
+
+  for (const { tx, changes } of parsed) {
+    const label = tradeLabel(changes, syms);
+    if (!todo.includes(tx)) {
+      await env.DB.prepare("UPDATE trades SET description = ? WHERE sig = ?").bind(label, tx.signature).run();
+      continue;
+    }
+    const value = tradeValue(changes, pxs);
     if (value == null || value < 0.5) continue;
-    const roundup = roundUpUsd(value, vault.multiplier);
+    const roundup = roundUpUsd(value, multiplier);
     await env.DB.prepare(
       "INSERT OR IGNORE INTO trades (sig, wallet, ts, source, description, value_usd, roundup_usd, multiplier) VALUES (?,?,?,?,?,?,?,?)",
-    ).bind(tx.signature, wallet, tx.timestamp, tx.source, (tx.description || "").slice(0, 200), value, roundup, vault.multiplier).run();
+    ).bind(tx.signature, wallet, tx.timestamp, tx.source, label, value, roundup, multiplier).run();
   }
 }
 
-/** USD value of a swap from the wallet's own balance changes: stablecoin leg first, then SOL, then a price lookup. */
-async function tradeValueUsd(env: Env, tx: HeliusTx, wallet: string): Promise<number | null> {
+/** Net token changes for the wallet in one transaction (SOL fee and rent dust removed). */
+function walletChanges(tx: HeliusTx, wallet: string) {
   const changes = new Map<string, number>();
   for (const a of tx.accountData ?? []) {
     if (a.account === wallet && a.nativeBalanceChange) {
@@ -253,18 +280,58 @@ async function tradeValueUsd(env: Env, tx: HeliusTx, wallet: string): Promise<nu
       changes.set(t.mint, (changes.get(t.mint) ?? 0) + v);
     }
   }
-  // Ignore SOL dust (rent for new token accounts etc.).
   if (Math.abs(changes.get(SOL) ?? 0) < 0.002) changes.delete(SOL);
   for (const [m, v] of changes) if (Math.abs(v) < 1e-9) changes.delete(m);
-  if (!changes.size) return null;
+  return changes;
+}
 
-  for (const [m, v] of changes) if (STABLES.has(m)) return Math.abs(v);
-  const sol = changes.get(SOL);
-  if (sol) return Math.abs(sol) * ((await prices(env, [SOL]))[SOL] ?? 0) || null;
-
+/** Which mint needs a USD price to value this trade (none when a stablecoin leg exists). */
+function priceMintFor(changes: Map<string, number>) {
+  if ([...changes.keys()].some((m) => STABLES.has(m))) return null;
+  if (changes.has(SOL)) return SOL;
   const out = [...changes].filter(([, v]) => v < 0).sort((a, b) => a[1] - b[1])[0] ?? [...changes][0];
-  const px = (await prices(env, [out[0]]))[out[0]];
-  return px ? Math.abs(out[1]) * px : null;
+  return out?.[0] ?? null;
+}
+
+/** USD value: stablecoin leg first, then SOL, then the token sold. */
+function tradeValue(changes: Map<string, number>, pxs: Record<string, number>): number | null {
+  if (!changes.size) return null;
+  for (const [m, v] of changes) if (STABLES.has(m)) return Math.abs(v);
+  const pm = priceMintFor(changes);
+  if (!pm || !pxs[pm]) return null;
+  return Math.abs(changes.get(pm)!) * pxs[pm];
+}
+
+/** "$BONK Buy", "$WIF Sell", "$JUP → $WIF" or "SOL → USDC". */
+function tradeLabel(changes: Map<string, number>, syms: Record<string, string>) {
+  const sym = (m: string) => QUOTE_SYMBOLS[m] ?? syms[m] ?? m.slice(0, 4) + "…";
+  const tokens = [...changes].filter(([m]) => !QUOTE_SYMBOLS[m]);
+  if (tokens.length === 1) return `$${sym(tokens[0][0])} ${tokens[0][1] > 0 ? "Buy" : "Sell"}`;
+  const sorted = [...(tokens.length >= 2 ? tokens : changes)].sort((a, b) => a[1] - b[1]);
+  if (sorted.length < 2) return "Swap";
+  const [sold, bought] = [sorted[0][0], sorted[sorted.length - 1][0]];
+  const fmt = (m: string) => (QUOTE_SYMBOLS[m] ? sym(m) : `$${sym(m)}`);
+  return `${fmt(sold)} → ${fmt(bought)}`;
+}
+
+/** Token symbols, cached in D1 so each mint is looked up once. */
+async function symbols(env: Env, mints: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!mints.length) return out;
+  const cached = await env.DB.prepare(`SELECT mint, symbol FROM tokens WHERE mint IN (${mints.map(() => "?").join(",")})`).bind(...mints).all<{ mint: string; symbol: string }>();
+  for (const c of cached.results ?? []) out[c.mint] = c.symbol;
+  const missing = mints.filter((m) => !out[m]);
+  if (missing.length) {
+    try {
+      const found = (await jup(env, `/tokens/v2/search?query=${missing.join(",")}`)) as { id: string; symbol: string }[];
+      for (const t of found ?? []) {
+        if (!missing.includes(t.id) || !t.symbol) continue;
+        out[t.id] = t.symbol.toUpperCase().slice(0, 16);
+        await env.DB.prepare("INSERT OR REPLACE INTO tokens (mint, symbol) VALUES (?, ?)").bind(t.id, out[t.id]).run();
+      }
+    } catch {}
+  }
+  return out;
 }
 
 async function prices(env: Env, mints: string[]): Promise<Record<string, number>> {
@@ -305,26 +372,46 @@ async function sweepWallet(env: Env, wallet: string) {
     : [{ mint: picks[Number(vault.sweepCount % BigInt(picks.length))], usd: amountUsd }];
 
   const results: any[] = [];
+  const ctx: SweepCtx = { blockhash: await rpc(env, "getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value), alts: new Map() };
   for (const leg of legs) {
-    results.push(await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd));
+    let r = await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd, ctx, false);
+    // If the best route leaves USDC dust behind (program error KeeperKeptFunds), retry once with a single-pool route.
+    if (r.status === "failed" && /0x1781/.test(r.error ?? "")) r = await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd, ctx, true);
+    results.push(r);
   }
   return { swept: results };
 }
 
-async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: PublicKey, mint: PublicKey, usd: number) {
+type SweepCtx = { blockhash: { blockhash: string; lastValidBlockHeight: number }; alts: Map<string, AddressLookupTableAccount> };
+
+// xStocks are Token-2022 mints (verified onchain at setup), so no lookup is needed per sweep.
+const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+const TOKEN_CLASSIC = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+const PROGRAM_ERRORS: Record<number, string> = {
+  6015: "This sweep would exceed the weekly limit",
+  6016: "The swap returned less than the minimum; nothing moved",
+  6017: "The swap route left some USDC behind, so the program refused it; nothing moved",
+  6005: "Cache is paused", 6006: "Round-ups are paused",
+};
+function explain(message: string) {
+  const m = message.match(/custom program error: 0x([0-9a-f]+)/i);
+  const code = m ? parseInt(m[1], 16) : null;
+  return code && PROGRAM_ERRORS[code] ? `${PROGRAM_ERRORS[code]} (code 0x${m![1]})` : message;
+}
+
+async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: PublicKey, mint: PublicKey, usd: number, ctx: SweepCtx, directOnly: boolean) {
   const wallet = owner.toBase58();
   const amount = toUsdcUnits(usd);
   const id = (await env.DB.prepare("INSERT INTO sweeps (wallet, ts, mint, amount_usd, status) VALUES (?,?,?,?, 'building') RETURNING id")
     .bind(wallet, now(), mint.toBase58(), usd).first<{ id: number }>())!.id;
   try {
-    const mintAcc = await getAccount(env, mint);
-    if (!mintAcc) throw new Error("Stock mint not found");
-    const tokenProgram = new PublicKey(mintAcc.owner);
+    const tokenProgram = stockByMint(mint.toBase58()) ? TOKEN_2022 : new PublicKey((await getAccount(env, mint))?.owner ?? TOKEN_CLASSIC);
     const dest = ata(owner, mint, tokenProgram);
 
     const slippage = env.SLIPPAGE_BPS ?? "100";
-    const quote = await jup(env, `/swap/v1/quote?inputMint=${USDC_MINT.toBase58()}&outputMint=${mint.toBase58()}&amount=${amount}&slippageBps=${slippage}&restrictIntermediateTokens=true&maxAccounts=48`);
-    if (!quote?.outAmount) throw new Error(`No route for ${stockByMint(mint.toBase58())?.symbol ?? mint.toBase58()}: ${JSON.stringify(quote).slice(0, 200)}`);
+    const quote = await jup(env, `/swap/v1/quote?inputMint=${USDC_MINT.toBase58()}&outputMint=${mint.toBase58()}&amount=${amount}&slippageBps=${slippage}&restrictIntermediateTokens=true&maxAccounts=48${directOnly ? "&onlyDirectRoutes=true" : ""}`);
+    if (!quote?.outAmount) throw new Error(`No route for ${stockByMint(mint.toBase58())?.symbol ?? mint.toBase58()}`);
     const ins = await jup(env, "/swap/v1/swap-instructions", {
       quoteResponse: quote,
       userPublicKey: keeper.publicKey.toBase58(),
@@ -338,7 +425,7 @@ async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: 
     const minOut = BigInt(quote.otherAmountThreshold);
     const ixs: TransactionInstruction[] = [
       ...(ins.computeBudgetInstructions ?? []).map(toIx),
-      createAtaIdempotentIx(keeper.publicKey, keeper.publicKey, USDC_MINT, new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA")),
+      createAtaIdempotentIx(keeper.publicKey, keeper.publicKey, USDC_MINT, TOKEN_CLASSIC),
       createAtaIdempotentIx(keeper.publicKey, owner, mint, tokenProgram),
       ...(ins.setupInstructions ?? []).map(toIx),
       beginSweepIx({ programId, owner, keeper: keeper.publicKey, dest, amount, minOut }),
@@ -346,40 +433,35 @@ async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: 
       endSweepIx({ programId, owner, keeper: keeper.publicKey, dest }),
       ...(ins.cleanupInstruction ? [toIx(ins.cleanupInstruction)] : []),
     ];
-    const alts = await loadAlts(env, ins.addressLookupTableAddresses ?? []);
-    const { value: bh } = await rpc(env, "getLatestBlockhash", [{ commitment: "confirmed" }]);
-    const msg = new TransactionMessage({ payerKey: keeper.publicKey, recentBlockhash: bh.blockhash, instructions: ixs }).compileToV0Message(alts);
+    const missingAlts = (ins.addressLookupTableAddresses ?? []).filter((a: string) => !ctx.alts.has(a));
+    for (const alt of await loadAlts(env, missingAlts)) ctx.alts.set(alt.key.toBase58(), alt);
+    const alts = (ins.addressLookupTableAddresses ?? []).map((a: string) => ctx.alts.get(a)).filter(Boolean) as AddressLookupTableAccount[];
+    const msg = new TransactionMessage({ payerKey: keeper.publicKey, recentBlockhash: ctx.blockhash.blockhash, instructions: ixs }).compileToV0Message(alts);
     const tx = new VersionedTransaction(msg);
     tx.sign([keeper]);
     const raw = btoa(String.fromCharCode(...tx.serialize()));
-    const sig: string = await rpc(env, "sendTransaction", [raw, { encoding: "base64", skipPreflight: false, maxRetries: 3, preflightCommitment: "confirmed" }]);
-    await env.DB.prepare("UPDATE sweeps SET sig = ?, status = 'sent', expected_out = ? WHERE id = ?").bind(sig, quote.outAmount, id).run();
+    const sig: string = await rpc(env, "sendTransaction", [raw, { encoding: "base64", skipPreflight: false, maxRetries: 5, preflightCommitment: "confirmed" }]);
+    await env.DB.prepare("UPDATE sweeps SET sig = ?, status = 'sent', expected_out = ?, lvbh = ? WHERE id = ?")
+      .bind(sig, quote.outAmount, ctx.blockhash.lastValidBlockHeight, id).run();
 
-    const status = await confirm(env, sig, 45);
-    if (status === "confirmed") {
-      await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(id).run();
-    } else if (status === "failed") {
+    // One quick check; anything still in flight is settled by the next status read (the app polls after a sweep).
+    await new Promise((res) => setTimeout(res, 2500));
+    const st = (await rpc(env, "getSignatureStatuses", [[sig]])).value?.[0];
+    let status = "sent";
+    if (st?.err) {
+      status = "failed";
       await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = 'Transaction failed onchain' WHERE id = ?").bind(id).run();
-    } // else stays 'sent'; the next state read re-checks it
+    } else if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") {
+      status = "confirmed";
+      await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(id).run();
+    }
     return { mint: mint.toBase58(), usd, sig, status };
   } catch (e: any) {
-    const message = (e?.message ?? String(e)).slice(0, 500);
+    const message = explain((e?.message ?? String(e)).slice(0, 500));
     await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = ? WHERE id = ?").bind(message, id).run();
-    await log(env, wallet, "error", `sweep ${mint.toBase58()}: ${message}`);
+    await log(env, wallet, "error", `sweep ${mint.toBase58()}${directOnly ? " (direct route)" : ""}: ${message}`);
     return { mint: mint.toBase58(), usd, status: "failed", error: message };
   }
-}
-
-async function confirm(env: Env, sig: string, seconds: number) {
-  const until = Date.now() + seconds * 1000;
-  while (Date.now() < until) {
-    const r = await rpc(env, "getSignatureStatuses", [[sig]]);
-    const s = r.value?.[0];
-    if (s?.err) return "failed";
-    if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") return "confirmed";
-    await new Promise((res) => setTimeout(res, 2000));
-  }
-  return "pending";
 }
 
 async function skip(env: Env, wallet: string, reason: string) {

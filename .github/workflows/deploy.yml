@@ -312,6 +312,9 @@ jobs:
           [ -n "$ID" ] || { echo "::error::Could not create or find the D1 database"; exit 1; }
           sed -i "s/__D1_ID__/$ID/" wrangler.toml
           npx wrangler d1 execute cache --remote --file=worker/schema.sql --yes
+          for m in worker/migrations/*.sql; do
+            npx wrangler d1 execute cache --remote --file="$m" --yes || echo "Migration $m already applied"
+          done
       - name: Configure
         run: |
           [ -f ../deploy/program-id.txt ] || { echo "::error::Deploy the program first."; exit 1; }

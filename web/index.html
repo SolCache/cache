@@ -7,7 +7,7 @@
 <title>Cache</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Silkscreen&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: Acorns-style marketing flow (promo bar → sticky nav → hero + phone → alternating feature rows → carousel → calculator → CTA → FAQ → dense footer), on a single committed black ground with gradient glows from the brand banner. */
 :root{
@@ -29,7 +29,7 @@
   --grad-rev: linear-gradient(110deg, var(--magenta) 0%, var(--violet) 25%, var(--blue) 55%, var(--teal) 100%);
   --font-display: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
   --font-body: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
-  --font-pixel: "Silkscreen", "Courier New", monospace;
+  --font-pixel: var(--font-body);
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   --r-sm: 10px;
   --r-md: 18px;
@@ -50,7 +50,7 @@ button{font:inherit;color:inherit}
 .wrap{max-width:1180px;margin:0 auto;padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px))}
 @media (min-width:760px){.wrap{padding-left:max(32px, env(safe-area-inset-left,0px));padding-right:max(32px, env(safe-area-inset-right,0px))}}
 .grad-text{background:var(--grad-rev);-webkit-background-clip:text;background-clip:text;color:transparent}
-.pixel{font-family:var(--font-pixel);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+.pixel{font-family:var(--font-body);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .tile{background:var(--tile) center/contain no-repeat;image-rendering:pixelated;aspect-ratio:320/250}
 
 /* Buttons */
@@ -115,7 +115,7 @@ button{font:inherit;color:inherit}
 .hero-sub strong{color:var(--fg);font-weight:600}
 .hero-cta{display:flex;flex-wrap:wrap;align-items:center;gap:16px 20px}
 .hero-note{font-size:14px;color:var(--dim)}
-.hero-visual{position:relative;display:flex;justify-content:center;min-width:0;perspective:1400px;padding-block:20px}
+.hero-visual{position:relative;display:flex;justify-content:center;min-width:0}
 .hero-visual .float-tile{position:absolute;width:190px;left:-30px;bottom:30px;filter:drop-shadow(0 30px 40px #9B4DFF55);animation:bob 6s ease-in-out infinite}
 .hero-visual .float-tile.small{width:96px;left:auto;right:-6px;top:40px;bottom:auto;animation-delay:-3s;filter:drop-shadow(0 18px 24px #22F2CC44)}
 @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
@@ -127,11 +127,7 @@ button{font:inherit;color:inherit}
 }
 
 /* Phone mockup */
-.phone{--rx:8deg;--ry:-22deg;--rz:3deg;position:relative;width:300px;max-width:100%;aspect-ratio:300/610;border-radius:46px;padding:10px;background:linear-gradient(160deg,#2A2A3C,#101018 40%,#1C1C2A);transform:rotateX(var(--rx)) rotateY(var(--ry)) rotateZ(var(--rz));transform-style:preserve-3d;transition:transform .5s cubic-bezier(.2,.7,.2,1);box-shadow:0 0 0 1px #34344A, 1px 1px 0 #2B2B3E, 2px 2px 0 #28283A, 3px 3px 0 #252536, 4px 4px 0 #222232, 5px 5px 0 #1F1F2E, 6px 6px 0 #1C1C2A, 7px 7px 0 #191926, 8px 8px 0 #161622, 40px 60px 80px -20px #000, -30px 20px 120px -30px #3D7CFF99, 30px -20px 120px -40px #E246F566}
-.phone::after{content:"";position:absolute;inset:10px;border-radius:37px;pointer-events:none;background:linear-gradient(115deg,#FFFFFF1A 0%,#FFFFFF08 28%,transparent 45%);z-index:3}
-.hero-visual.tracking .phone{transition:transform .12s linear}
-@media (max-width:900px){.phone{--rx:6deg;--ry:-14deg;--rz:2deg}}
-@media (prefers-reduced-motion: reduce){.phone{transition:none}}
+.phone{position:relative;width:300px;max-width:100%;aspect-ratio:300/610;border-radius:46px;padding:10px;background:linear-gradient(160deg,#2A2A3C,#101018 40%,#1C1C2A);box-shadow:0 0 0 1px #34344A, 0 40px 80px -30px #000, 0 0 120px -40px #3D7CFF}
 .screen{position:relative;height:100%;border-radius:37px;background:var(--bg-2);overflow:hidden;display:flex;flex-direction:column;padding:16px 16px 0;font-size:12px}
 .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:88px;height:24px;border-radius:20px;background:#000}
 .s-top{display:flex;justify-content:space-between;align-items:center;margin-top:28px}
@@ -370,7 +366,7 @@ details{border-bottom:1px solid var(--line-solid)}
 details:first-child{border-top:1px solid var(--line-solid)}
 summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:20px;padding:22px 0;font-weight:700;font-size:18px}
 summary::-webkit-details-marker{display:none}
-summary::after{content:"+";font-family:var(--font-pixel);font-size:20px;color:var(--teal);transition:transform .2s;flex:none}
+summary::after{content:"+";font-family:var(--font-body);font-size:22px;font-weight:600;color:var(--teal);transition:transform .2s;flex:none}
 details[open] summary::after{transform:rotate(45deg)}
 details p{color:var(--muted);padding:0 0 22px;max-width:40em}
 .support{margin-top:28px;padding:24px;border-radius:var(--r-md);background:var(--bg-2);border:1px solid var(--line-solid)}
@@ -840,21 +836,6 @@ dialog::backdrop{background:#000000B3;backdrop-filter:blur(6px)}
   }
   $('#sBar').style.width = (pending / cap * 100) + '%';
   if (!reduced) setInterval(addTrade, 3200);
-
-  /* Phone tilt follows the pointer */
-  var hv = $('.hero-visual'), phone = $('.phone');
-  if (!reduced && window.matchMedia && matchMedia('(hover: hover)').matches) {
-    hv.addEventListener('pointermove', function(e){
-      var r = hv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
-      hv.classList.add('tracking');
-      phone.style.setProperty('--ry', (-22 + x * 18).toFixed(2) + 'deg');
-      phone.style.setProperty('--rx', (8 - y * 12).toFixed(2) + 'deg');
-    });
-    hv.addEventListener('pointerleave', function(){
-      hv.classList.remove('tracking');
-      phone.style.removeProperty('--ry'); phone.style.removeProperty('--rx');
-    });
-  }
 
   /* xStock picker */
   $$('#picker .stock').forEach(function(b){

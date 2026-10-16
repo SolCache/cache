@@ -177,8 +177,16 @@ async function sweepNow() {
   else if (res?.swept) {
     const ok = res.swept.filter((s: any) => s.status === "confirmed").length;
     const failed = res.swept.filter((s: any) => s.status === "failed");
-    toast(failed.length ? `Swept ${ok} of ${res.swept.length}. ${esc(failed[0].error)}` : `Swept into ${ok} stock${ok === 1 ? "" : "s"}.`, failed.length > 0);
+    const pending = res.swept.filter((s: any) => s.status === "sent").length;
+    toast(failed.length ? `Swept ${ok} of ${res.swept.length}. ${esc(failed[0].error)}` : pending ? `Sent ${res.swept.length} swap${res.swept.length === 1 ? "" : "s"}; confirming…` : `Swept into ${ok} stock${ok === 1 ? "" : "s"}.`, failed.length > 0);
   }
+  render();
+  for (let i = 0; i < 12 && state?.sweeps.some((w: any) => w.status === "sent" || w.status === "building"); i++) {
+    await new Promise((r) => setTimeout(r, 5000));
+    state = await api<State>(`/api/state?wallet=${owner.toBase58()}`);
+    render();
+  }
+  if (owner && state?.vault) await loadHoldings(state.vault.picks).catch(() => {});
   render();
 }
 
@@ -326,10 +334,12 @@ function dashboardView() {
   <section class="card stack">
     <h3>Sweeps</h3>
     <div class="table-wrap">${s.sweeps.length ? `<table><thead><tr><th>When</th><th>Stock</th><th style="text-align:right">USDC</th><th>Status</th><th>Details</th></tr></thead><tbody>
-      ${s.sweeps.map((w) => `<tr><td>${when(w.ts)}</td><td class="mono">${esc(stockByMint(w.mint)?.symbol ?? short(w.mint))}</td><td class="num">${money(w.amount_usd)}</td><td><span class="status ${esc(w.status)}">${esc(w.status)}</span></td><td class="desc">${w.sig ? `<a href="${solscan(w.sig)}" target="_blank" rel="noopener">Solscan</a> ` : ""}${esc(w.error || "")}</td></tr>`).join("")}
+      ${s.sweeps.map((w) => `<tr><td>${when(w.ts)}</td><td class="mono">${esc(stockByMint(w.mint)?.symbol ?? short(w.mint))}</td><td class="num">${money(w.amount_usd)}</td><td><span class="status ${esc(w.status)}">${esc(STATUS_LABEL[w.status] ?? w.status)}</span></td><td class="desc">${w.sig ? `<a href="${solscan(w.sig)}" target="_blank" rel="noopener">Solscan</a> ` : ""}${esc(w.error || "")}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">No sweeps yet. Once round-ups reach ${money(cfg.minSweepUsd)}, use “Sweep now” or wait for the daily sweep.</div>`}</div>
   </section>`;
 }
+
+const STATUS_LABEL: Record<string, string> = { building: "Preparing", sent: "Pending", confirmed: "Confirmed", failed: "Failed", expired: "Dropped" };
 
 const when = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 

@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS sweeps (
   expected_out TEXT,
   sig TEXT,
   status TEXT NOT NULL,
-  error TEXT
+  error TEXT,
+  lvbh INTEGER
 );
 CREATE INDEX IF NOT EXISTS sweeps_wallet_ts ON sweeps (wallet, ts DESC);
 
@@ -37,4 +38,9 @@ CREATE TABLE IF NOT EXISTS logs (
   wallet TEXT,
   level TEXT NOT NULL,
   message TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tokens (
+  mint TEXT PRIMARY KEY,
+  symbol TEXT NOT NULL
 );
