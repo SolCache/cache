@@ -18,7 +18,7 @@ use anchor_lang::Discriminator;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 use anchor_spl::token_interface::TokenAccount as AnyTokenAccount;
 
-declare_id!("11111111111111111111111111111111");
+declare_id!("GUhLX8WTmUJ9eF2pJxLbUkprfJVvs3JBkyAH6dc6bLj5");
 
 pub const MAX_PICKS: usize = 5;
 pub const MAX_ALLOWED_MINTS: usize = 24;

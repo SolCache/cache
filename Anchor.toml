@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.mainnet]
-cache = "11111111111111111111111111111111"
+cache = "GUhLX8WTmUJ9eF2pJxLbUkprfJVvs3JBkyAH6dc6bLj5"
 
 [provider]
 cluster = "mainnet"
