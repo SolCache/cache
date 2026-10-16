@@ -3,6 +3,7 @@ name = "cache"
 version = "0.1.0"
 description = "Cache: round-ups from every trade, invested into xStocks"
 edition = "2021"
+rust-version = "1.79"
 
 [lib]
 crate-type = ["cdylib", "lib"]

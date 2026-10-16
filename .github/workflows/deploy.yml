@@ -81,10 +81,28 @@ jobs:
           anchor --version
           cargo --version
 
+      - name: Lock dependencies to versions Solana's compiler supports
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            rustup toolchain install stable --profile minimal
+            CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +stable generate-lockfile
+            echo "NEW_LOCKFILE=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Build
         run: |
           anchor build --no-idl
           ls -la target/deploy
+
+      - name: Save lockfile
+        if: env.NEW_LOCKFILE == 'true' && github.event_name == 'push'
+        run: |
+          git config user.name "cache-deploy-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "Pin Rust dependencies for the Solana toolchain"
+          git pull --rebase origin main
+          git push origin HEAD:main
 
       - name: Report deploy cost (read-only)
         env:
