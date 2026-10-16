@@ -94,6 +94,14 @@ jobs:
           anchor build --no-idl
           ls -la target/deploy
 
+      - name: Explain too-new dependencies
+        if: failure()
+        run: |
+          for c in block-buffer digest cpufeatures sha2 crypto-common hybrid-array; do
+            echo "=== $c ==="; cargo +stable tree -i "$c" -e normal --target all 2>&1 | head -40 || true
+          done
+          grep -A2 -E '^name = "(block-buffer|digest|sha2|crypto-common|hybrid-array|cpufeatures)"' Cargo.lock || true
+
       - name: Save lockfile
         if: env.NEW_LOCKFILE == 'true' && github.event_name == 'push'
         run: |
