@@ -129,6 +129,36 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
     return json({ result, state: await walletState(env, wallet, false) });
   }
 
+  // Sell every xStock the wallet holds for USDC. Preview returns quotes; build returns unsigned swap
+  // transactions for the user to sign in their own wallet (Cache never touches these funds).
+  if (p === "/api/sell" && req.method === "POST") {
+    const { wallet, build } = (await req.json()) as { wallet: string; build?: boolean };
+    const owner = new PublicKey(wallet);
+    const atas = STOCKS.map((s) => ata(owner, new PublicKey(s.mint), TOKEN_2022));
+    const accs = await getAccounts(env, atas);
+    const held = STOCKS.map((s, i) => ({ s, amount: accs[i] ? decodeTokenAccount(accs[i]!.data).amount : 0n })).filter((h) => h.amount > 0n);
+    const legs: any[] = [];
+    for (const { s, amount } of held) {
+      try {
+        const quote = await jup(env, `/swap/v1/quote?inputMint=${s.mint}&outputMint=${USDC_MINT.toBase58()}&amount=${amount}&slippageBps=${env.SLIPPAGE_BPS ?? "100"}&restrictIntermediateTokens=true`);
+        if (!quote?.outAmount) throw new Error("No route");
+        const leg: any = { mint: s.mint, symbol: s.symbol, amount: amount.toString(), usdcOut: Number(quote.outAmount) / 1e6 };
+        if (build) {
+          const swap = await jup(env, "/swap/v1/swap", {
+            quoteResponse: quote, userPublicKey: wallet, wrapAndUnwrapSol: false, dynamicComputeUnitLimit: true,
+            prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 300000, priorityLevel: "high" } },
+          });
+          if (!swap?.swapTransaction) throw new Error(swap?.error ?? "Jupiter didn't return a transaction");
+          leg.tx = swap.swapTransaction;
+        }
+        legs.push(leg);
+      } catch (e: any) {
+        legs.push({ mint: s.mint, symbol: s.symbol, amount: amount.toString(), error: e?.message ?? String(e) });
+      }
+    }
+    return json({ legs, totalUsdc: legs.reduce((a, l) => a + (l.usdcOut ?? 0), 0) });
+  }
+
   if (p === "/api/health") {
     const keeper = keeperKeypair(env).publicKey;
     const bal = await rpc(env, "getBalance", [keeper.toBase58(), { commitment: "confirmed" }]);
@@ -263,6 +293,7 @@ async function syncTrades(env: Env, wallet: string, opts: { baselineOnly?: boole
   const [syms, pxs] = await Promise.all([symbols(env, [...symbolMints]), priceMints.size ? prices(env, [...priceMints]) : Promise.resolve({} as Record<string, number>)]);
 
   for (const { tx, changes } of parsed) {
+    if (todo.includes(tx) && [...changes.keys()].some((m) => stockByMint(m))) continue;
     const label = tradeLabel(changes, syms);
     if (!todo.includes(tx)) {
       await env.DB.prepare("UPDATE trades SET description = ? WHERE sig = ?").bind(label, tx.signature).run();

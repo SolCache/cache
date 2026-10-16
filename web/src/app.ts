@@ -230,6 +230,38 @@ async function stopCache() {
   await refresh();
 }
 
+async function previewConvert() {
+  if (!owner) return;
+  const r = await api<{ legs: SellLeg[]; totalUsdc: number }>("/api/sell", { wallet: owner.toBase58() });
+  if (!r.legs.length) { toast("You don't hold any xStocks yet."); return; }
+  convert = r;
+}
+
+async function confirmConvert() {
+  if (!owner || !provider) return;
+  // Build fresh transactions at confirm time so their blockhash is current.
+  const r = await api<{ legs: SellLeg[] }>("/api/sell", { wallet: owner.toBase58(), build: true });
+  const legs = r.legs.filter((l) => l.tx);
+  if (!legs.length) throw new Error(r.legs[0]?.error ?? "No routes to USDC right now; try again shortly.");
+  const txs = legs.map((l) => VersionedTransaction.deserialize(Uint8Array.from(atob(l.tx!), (c) => c.charCodeAt(0))));
+  toast(`Approve ${txs.length} swap${txs.length === 1 ? "" : "s"} in your wallet…`);
+  const signed: VersionedTransaction[] = provider.signAllTransactions ? await provider.signAllTransactions(txs) : await Promise.all(txs.map((t) => provider.signTransaction(t)));
+  const sigs: string[] = [];
+  for (const t of signed) sigs.push(await rpc("sendTransaction", [btoa(String.fromCharCode(...t.serialize())), { encoding: "base64", maxRetries: 5 }]));
+  toast("Converting to USDC: confirming…");
+  let done = 0, failedCount = 0;
+  for (let i = 0; i < 30 && done + failedCount < sigs.length; i++) {
+    await new Promise((res) => setTimeout(res, 2000));
+    const st = (await rpc("getSignatureStatuses", [sigs])).value ?? [];
+    done = st.filter((x: any) => x && !x.err && (x.confirmationStatus === "confirmed" || x.confirmationStatus === "finalized")).length;
+    failedCount = st.filter((x: any) => x?.err).length;
+  }
+  convert = null;
+  const skipped = r.legs.length - legs.length;
+  toast(`Converted ${done} of ${r.legs.length} to USDC.${failedCount ? ` ${failedCount} failed.` : ""}${skipped ? ` ${skipped} had no route.` : ""} <a href="${solscan(sigs[0])}" target="_blank" rel="noopener">View on Solscan</a>`, failedCount > 0 || done < legs.length);
+  await refresh();
+}
+
 async function sweepNow() {
   if (!owner) return;
   toast("Sweeping your round-ups… this can take up to a minute.");
@@ -256,6 +288,8 @@ async function sweepNow() {
 // ---------------------------------------------------------------- data
 
 let holdings: { symbol: string; amount: number }[] = [];
+type SellLeg = { mint: string; symbol: string; amount: string; usdcOut?: number; tx?: string; error?: string };
+let convert: null | { legs: SellLeg[]; totalUsdc: number } = null;
 
 async function refresh() {
   if (!owner) return render();
@@ -404,8 +438,15 @@ function dashboardView() {
       <button class="btn btn-ghost" data-act="${v.paused ? "resume" : "pause"}" ${busy ? "disabled" : ""}>${v.paused ? "Resume" : "Pause"}</button>
       <button class="btn btn-ghost" data-act="edit" ${busy ? "disabled" : ""}>Edit settings</button>
       <button class="btn btn-ghost" data-act="topup" ${busy ? "disabled" : ""}>${f === "SOL" ? `Add ${sol(Math.round(v.weeklyCap * form.weeks * 1e4) / 1e4)}` : `Top up approval (${form.weeks} wk)`}</button>
+      <button class="btn btn-ghost" data-act="convert" ${busy || !holdings.some((h) => h.amount > 0) ? "disabled" : ""}>Convert all to USDC</button>
       <button class="btn btn-danger" data-act="stop" ${busy ? "disabled" : ""}>Stop Cache</button>
     </div>
+    ${convert ? `<div class="summary">
+      ${convert.legs.map((l) => `<div><span>${esc(l.symbol)}</span><b>${l.error ? `<span class="dim">${esc(l.error)}</span>` : `≈ ${money(l.usdcOut ?? 0)}`}</b></div>`).join("")}
+      <div><span>You'll receive about</span><b class="mono">${money(convert.totalUsdc)} USDC</b></div>
+    </div>
+    <p class="dim" style="font-size:13px">Sells every xStock in this wallet for USDC through Jupiter (up to 1% slippage). You sign each swap in your wallet; Cache never holds these funds.</p>
+    <div class="row"><button class="btn btn-ghost" data-act="cancel-convert">Cancel</button><button class="btn btn-primary" data-act="confirm-convert" ${busy ? "disabled" : ""}>Confirm and sign</button></div>` : ""}
   </section>
 
   <section class="card stack">
@@ -474,6 +515,9 @@ document.addEventListener("click", (e) => {
   if (act === "resume") return void run(() => setPaused(false));
   if (act === "topup") return void run(topUp);
   if (act === "sweep") return void run(sweepNow);
+  if (act === "convert") return void run(previewConvert);
+  if (act === "cancel-convert") { convert = null; return render(); }
+  if (act === "confirm-convert") return void run(confirmConvert);
   if (act === "stop") {
     if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.textContent = "Tap again to stop and revoke"; return; }
     return void run(stopCache);
