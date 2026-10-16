@@ -91,6 +91,13 @@ jobs:
             echo "NEW_LOCKFILE=true" >> "$GITHUB_ENV"
           fi
 
+      - name: Use a throwaway program address for testing
+        run: |
+          solana-keygen new --no-bip39-passphrase --silent --force -o /tmp/test-program.json
+          TEST_PROGRAM_ID=$(solana-keygen pubkey /tmp/test-program.json)
+          sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$TEST_PROGRAM_ID\")/" programs/cache/src/lib.rs
+          echo "TEST_PROGRAM_ID=$TEST_PROGRAM_ID" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           anchor build --no-idl
@@ -114,6 +121,22 @@ jobs:
           git commit -m "Pin Rust dependencies for the Solana toolchain"
           git pull --rebase --autostash origin main
           git push origin HEAD:main
+
+      - name: Test on a local validator (free, nothing on mainnet)
+        run: |
+          cd web && npm install --no-audit --no-fund --silent
+          TEST_AUTH=$(npx tsx scripts/localnet-accounts.ts)
+          solana-test-validator --reset --quiet --ledger /tmp/ledger \
+            --upgradeable-program "$TEST_PROGRAM_ID" ../target/deploy/cache.so "$TEST_AUTH" \
+            --account EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v /tmp/localnet/usdc.json > /tmp/validator.log 2>&1 &
+          for i in $(seq 1 90); do solana cluster-version --url http://127.0.0.1:8899 > /dev/null 2>&1 && break; sleep 1; done
+          set -o pipefail
+          npx tsx scripts/localnet-test.ts 2>&1 | tee /tmp/test.log
+          { echo "### Local validator test"; echo '```'; cat /tmp/test.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validator log
+        if: failure()
+        run: tail -50 /tmp/validator.log || true
 
       - name: Report deploy cost (read-only)
         env:
