@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cache Docs</title>
+<meta name="description" content="How Cache works, what it can and can't touch in your wallet, the onchain addresses, and the open-source code.">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05050A">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#05050A; --bg-2:#0B0B13; --surface:#11111B; --surface-2:#171724;
+  --line:#23233243; --line-solid:#23233A;
+  --fg:#F4F5FA; --muted:#9C9EB6; --dim:#626580;
+  --teal:#22F2CC; --blue:#3D7CFF; --violet:#9B4DFF; --magenta:#E246F5; --warn:#F5B942;
+  --grad: linear-gradient(110deg, var(--teal) 0%, var(--blue) 48%, var(--violet) 78%, var(--magenta) 100%);
+  --grad-rev: linear-gradient(110deg, var(--magenta) 0%, var(--violet) 25%, var(--blue) 55%, var(--teal) 100%);
+  --font: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit}
+h1,h2,h3{margin:0;letter-spacing:-0.025em;text-wrap:balance}
+p{margin:0}
+:focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px))}
+@media (min-width:760px){.wrap{padding-left:32px;padding-right:32px}}
+.tile{display:inline-block;background:url(/logo.svg) center/contain no-repeat;aspect-ratio:1/1}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--teal)}
+.grad-text{background:var(--grad-rev);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:999px;font-weight:700;font-size:15px;padding:12px 22px;cursor:pointer;text-decoration:none;white-space:nowrap;transition:box-shadow .2s}
+.btn-primary{background:var(--fg);color:var(--bg)}
+.btn-primary:hover{box-shadow:0 0 0 4px #22F2CC33, 0 10px 30px -10px var(--teal)}
+.btn-ghost{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1.5px var(--line-solid)}
+.btn-ghost:hover{box-shadow:inset 0 0 0 1.5px var(--muted)}
+.btn svg{width:18px;height:18px}
+
+.header{position:sticky;top:0;z-index:50;background:#05050ACC;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.header .wrap{display:flex;align-items:center;gap:28px;height:68px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:800;font-size:22px;letter-spacing:-0.03em}
+.brand .tile{width:36px}
+.nav{display:flex;gap:26px;font-size:15px;font-weight:600;color:var(--muted)}
+.nav a{text-decoration:none}
+.nav a:hover,.nav a[aria-current="page"]{color:var(--fg)}
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:12px}
+@media (max-width:720px){.nav{display:none}.header-actions .btn-ghost span{display:none}.header-actions .btn-ghost{padding:12px}}
+
+.hero{border-bottom:1px solid var(--line-solid);background:radial-gradient(60% 120% at 85% 0%, #3D7CFF22, transparent 60%), var(--bg)}
+.hero .wrap{padding-block:72px 56px;display:flex;flex-direction:column;gap:18px}
+.hero h1{font-size:clamp(40px,6vw,68px);font-weight:800;line-height:1.02;letter-spacing:-0.04em}
+.hero p{color:var(--muted);font-size:clamp(17px,2vw,19px);max-width:38em}
+.hero .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+.notice{display:flex;gap:12px;align-items:flex-start;margin-top:14px;max-width:44em;padding:14px 16px;border-radius:14px;border:1px dashed #F5B94266;background:#F5B9420D;color:#F5D58A;font-size:14.5px}
+
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:56px;padding-block:56px 96px}
+@media (max-width:960px){.layout{grid-template-columns:1fr;gap:0;padding-top:40px}}
+.toc{position:sticky;top:96px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14.5px}
+.toc b{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.toc a{text-decoration:none;color:var(--muted);padding:6px 0 6px 14px;border-left:2px solid var(--line-solid)}
+.toc a:hover{color:var(--fg);border-color:var(--muted)}
+@media (max-width:960px){.toc{display:none}}
+
+.doc{max-width:780px;display:flex;flex-direction:column;gap:64px}
+.doc section{display:flex;flex-direction:column;gap:16px}
+.doc h2{font-size:clamp(26px,3vw,32px);font-weight:800;line-height:1.15}
+.doc h3{font-size:18px;font-weight:700;margin-top:8px}
+.doc p,.doc li{color:#C9CBDB}
+.doc strong{color:var(--fg)}
+.doc ul,.doc ol{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}
+.doc code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);border:1px solid var(--line-solid);border-radius:6px;padding:1px 6px;color:var(--fg)}
+
+.steps{list-style:none;padding:0!important;counter-reset:s;gap:12px!important}
+.steps li{counter-increment:s;display:grid;grid-template-columns:36px 1fr;gap:14px;padding:16px 18px;background:var(--surface);border:1px solid var(--line-solid);border-radius:16px}
+.steps li::before{content:counter(s);display:grid;place-items:center;width:36px;height:36px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line-solid);font-weight:800;color:var(--teal)}
+.steps b{display:block;color:var(--fg);margin-bottom:2px}
+
+.example{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.example{grid-template-columns:1fr}}
+.example div{padding:16px 18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.example span{display:block;font-size:13px;color:var(--muted)}
+.example b{font-family:var(--mono);font-size:22px;font-weight:500}
+
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.checks{grid-template-columns:1fr}}
+.checks div{padding:16px 18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.checks b{display:block;color:var(--fg);margin-bottom:4px}
+.checks p{font-size:14.5px;color:var(--muted)}
+
+.table{overflow-x:auto;border:1px solid var(--line-solid);border-radius:16px}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line-solid);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:700;background:var(--bg-2)}
+td{color:#C9CBDB}
+td.addr a{font-family:var(--mono);font-size:13px;color:var(--fg);text-decoration:none;border-bottom:1px dotted var(--dim);word-break:break-all}
+td.addr a:hover{border-bottom-color:var(--teal)}
+
+.repo{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;padding:24px;border-radius:20px;background:linear-gradient(var(--surface),var(--surface)) padding-box, var(--grad) border-box;border:1.5px solid transparent}
+.repo .name{font-family:var(--mono);font-size:17px;color:var(--fg)}
+.repo p{color:var(--muted);font-size:14.5px;margin-top:4px}
+
+.footer{border-top:1px solid var(--line-solid);background:var(--bg-2)}
+.footer .wrap{padding-block:32px calc(32px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;font-size:13.5px;color:var(--dim)}
+.footer nav{display:flex;gap:20px}
+.footer a{color:var(--muted);text-decoration:none}
+.footer a:hover{color:var(--fg)}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Cache home"><span class="tile" aria-hidden="true"></span>Cache</a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/docs" aria-current="page">Docs</a>
+      <a href="https://github.com/SolCache/cache" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost" href="https://github.com/SolCache/cache" target="_blank" rel="noopener" aria-label="Source code on GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg><span>Source</span></a>
+      <a class="btn btn-primary" href="/app">Open app</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <span class="eyebrow">Docs</span>
+      <h1>How <span class="grad-text">Cache</span> works.</h1>
+      <p>What happens to your round-ups, exactly what Cache can and can't touch in your wallet, and where to check every piece of it yourself. All of the code is public.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/SolCache/cache" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>View the code on GitHub</a>
+        <a class="btn btn-ghost" href="/app">Open the app</a>
+      </div>
+      <div class="notice" role="note"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;margin-top:2px"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg><span>Cache is a mainnet test of unaudited software. Use a wallet with only a small amount in it. xStocks aren't available to US persons or in other restricted places.</span></div>
+    </div>
+  </div>
+
+  <div class="wrap layout">
+    <nav class="toc" aria-label="On this page">
+      <b>On this page</b>
+      <a href="#overview">Overview</a>
+      <a href="#roundups">Round-ups</a>
+      <a href="#sweeps">Sweeps</a>
+      <a href="#funding">Funding: USDC or SOL</a>
+      <a href="#safety">What Cache can touch</a>
+      <a href="#control">Pausing, withdrawing, stopping</a>
+      <a href="#fees">Fees</a>
+      <a href="#addresses">Onchain addresses</a>
+      <a href="#source">Source code</a>
+    </nav>
+
+    <article class="doc">
+      <section id="overview">
+        <h2>Overview</h2>
+        <p>Cache watches the swaps your Solana wallet makes on any app, rounds each one up to the next dollar, and once a day buys the tokenized stocks (xStocks) you picked with that spare change. What it buys lands straight in your own wallet.</p>
+        <ol class="steps">
+          <li><div><b>Connect and choose</b>Pick up to 5 xStocks, a weekly limit, a multiplier, and whether to fund round-ups with USDC or SOL.</div></li>
+          <li><div><b>Approve once</b>One signature gives Cache's onchain program permission to spend from your funding account, up to your weekly limit. Nothing leaves your wallet at this point.</div></li>
+          <li><div><b>Trade like you always do</b>Cache sees each swap your wallet signs and adds its round-up to your pending total.</div></li>
+          <li><div><b>Daily sweep</b>Once a day the pending total is swapped through Jupiter into your picks and sent to your wallet.</div></li>
+        </ol>
+      </section>
+
+      <section id="roundups">
+        <h2>Round-ups</h2>
+        <p>Each swap is valued in US dollars and rounded up to the next whole dollar. A swap that's already a whole dollar adds a full $1. Your multiplier (1x, 2x, 5x, 10x, 20x, 50x or 100x) then scales the round-up.</p>
+        <div class="example" aria-label="Example">
+          <div><span>Swap value</span><b>$47.60</b></div>
+          <div><span>Round-up at 1x</span><b>$0.40</b></div>
+          <div><span>Round-up at 5x</span><b>$2.00</b></div>
+        </div>
+        <ul>
+          <li>Only transactions your own wallet signed and paid the fee for count. Incoming transfers and airdrops don't.</li>
+          <li>Swaps that buy or sell xStocks are skipped, so Cache's own purchases and your stock sales never trigger more round-ups.</li>
+          <li>Round-ups start from the moment you set Cache up. Earlier history isn't counted.</li>
+        </ul>
+      </section>
+
+      <section id="sweeps">
+        <h2>Sweeps</h2>
+        <p>Cache checks for new swaps every 15 minutes and sweeps once a day at <strong>12:00 UTC</strong>. You can also press <strong>Sweep now</strong> in the app.</p>
+        <ul>
+          <li>A sweep only runs once at least $1 is pending, so tiny amounts aren't eaten by network fees.</li>
+          <li>The pending amount is split evenly across your picks. When it's too small to split (under $0.50 a pick), it all goes to one pick, rotating each sweep. Each pick is its own swap through Jupiter, with at most 1% slippage.</li>
+          <li>Each sweep is capped by your weekly limit (up to $100,000, or 1,000 SOL when funding with SOL). The limit resets 7 days after it last started and is enforced by the program onchain, not just by the website.</li>
+          <li>Every sweep is a public transaction. Your dashboard links each one to a block explorer.</li>
+        </ul>
+      </section>
+
+      <section id="funding">
+        <h2>Funding: USDC or SOL</h2>
+        <h3>USDC</h3>
+        <p>Your USDC stays in your normal USDC account. During setup you approve Cache's vault (a program address unique to your wallet) as a <em>delegate</em> on that account, for a set amount. Cache can only spend within that approval and your weekly limit, and you can top up or revoke it at any time.</p>
+        <h3>SOL</h3>
+        <p>You set aside an amount of SOL into a <strong>Cache SOL</strong> account. It's a wrapped-SOL token account that you own, kept separate from your main balance so wallets don't sweep it up. Cache's vault is approved as delegate on that account only. Your main SOL balance is never touched.</p>
+        <p>You can add more SOL, or withdraw part or all of it back to your main balance, from the dashboard at any time.</p>
+      </section>
+
+      <section id="safety">
+        <h2>What Cache can touch</h2>
+        <p>Sweeps are signed by a server wallet called the <strong>keeper</strong>. The keeper never holds your funds and can't send them anywhere you didn't choose. The Cache program checks every sweep onchain and rejects the whole transaction if any check fails:</p>
+        <div class="checks">
+          <div><b>Only your funding account</b><p>Spending comes only from the USDC or Cache SOL account you approved, never your other tokens or your main SOL.</p></div>
+          <div><b>Only up to your limit</b><p>Each sweep counts against your weekly limit, tracked onchain in your vault.</p></div>
+          <div><b>Only to your wallet</b><p>The output has to land in a token account owned by you, for a stock in your picks and on the program's allowlist.</p></div>
+          <div><b>Only a real swap in between</b><p>A sweep opens and closes inside one transaction. The only instructions allowed in between are Jupiter's swap program, compute budget and token-account creation.</p></div>
+          <div><b>A minimum output</b><p>Each swap has to deliver at least a quoted minimum amount of stock, or it fails.</p></div>
+          <div><b>Leftovers come back</b><p>Anything the route didn't use is refunded to your funding account in the same transaction. The keeper ends with nothing extra.</p></div>
+        </div>
+        <p>Revoking the approval, from the app or from your wallet, stops Cache immediately. Your stocks are always in your own wallet and Cache has no way to move them.</p>
+      </section>
+
+      <section id="control">
+        <h2>Pausing, withdrawing, stopping</h2>
+        <ul>
+          <li><strong>Pause</strong> stops sweeps without changing anything else. Resume whenever you like.</li>
+          <li><strong>Edit settings</strong> changes your picks, weekly limit or multiplier with one signature.</li>
+          <li><strong>Withdraw SOL</strong> moves 25%, 50% or all of your Cache SOL back to your main balance.</li>
+          <li><strong>Convert all to USDC</strong> sells the xStocks in your wallet back to USDC. You review a quote and sign it yourself.</li>
+          <li><strong>Stop Cache</strong> revokes the approval, closes your vault and returns its rent to you. With SOL funding, it also closes the Cache SOL account and returns the SOL to your main balance.</li>
+        </ul>
+      </section>
+
+      <section id="fees">
+        <h2>Fees</h2>
+        <p>Cache charges no fee during the test. The keeper pays the network fees for sweeps. You pay the normal network fee on the transactions you sign yourself (setup, edits, withdrawals), and swaps carry the usual pool fees and price impact of the route Jupiter picks.</p>
+      </section>
+
+      <section id="addresses">
+        <h2>Onchain addresses</h2>
+        <p>Everything below runs on Solana mainnet. Each address opens on Solscan.</p>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">What</th><th scope="col">Address</th></tr></thead>
+            <tbody>
+              <tr><td>Cache program</td><td class="addr"><a href="https://solscan.io/account/GUhLX8WTmUJ9eF2pJxLbUkprfJVvs3JBkyAH6dc6bLj5" target="_blank" rel="noopener">GUhLX8WTmUJ9eF2pJxLbUkprfJVvs3JBkyAH6dc6bLj5</a></td></tr>
+              <tr><td>Keeper</td><td class="addr"><a href="https://solscan.io/account/CeSAevA1Xcf3fG54pUmTZFzy4Sr7WVg2SPKpspUW582Q" target="_blank" rel="noopener">CeSAevA1Xcf3fG54pUmTZFzy4Sr7WVg2SPKpspUW582Q</a></td></tr>
+              <tr><td>Swap program (Jupiter v6)</td><td class="addr"><a href="https://solscan.io/account/JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4" target="_blank" rel="noopener">JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h3>Supported xStocks</h3>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Stock</th><th scope="col">Mint</th></tr></thead>
+            <tbody>
+              <tr><td>TSLAx · Tesla</td><td class="addr"><a href="https://solscan.io/token/XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB" target="_blank" rel="noopener">XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB</a></td></tr>
+              <tr><td>NVDAx · NVIDIA</td><td class="addr"><a href="https://solscan.io/token/Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" target="_blank" rel="noopener">Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh</a></td></tr>
+              <tr><td>AAPLx · Apple</td><td class="addr"><a href="https://solscan.io/token/XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp" target="_blank" rel="noopener">XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp</a></td></tr>
+              <tr><td>SPYx · S&amp;P 500 ETF</td><td class="addr"><a href="https://solscan.io/token/XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W" target="_blank" rel="noopener">XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W</a></td></tr>
+              <tr><td>GOOGLx · Alphabet</td><td class="addr"><a href="https://solscan.io/token/XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN" target="_blank" rel="noopener">XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN</a></td></tr>
+              <tr><td>MSFTx · Microsoft</td><td class="addr"><a href="https://solscan.io/token/XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX" target="_blank" rel="noopener">XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX</a></td></tr>
+              <tr><td>QQQx · Nasdaq 100 ETF</td><td class="addr"><a href="https://solscan.io/token/Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ" target="_blank" rel="noopener">Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The program is upgradeable while Cache is in testing. Solscan's program page shows the current upgrade authority.</p>
+      </section>
+
+      <section id="source">
+        <h2>Source code</h2>
+        <p>Cache is open source. The program, the website, the app and the keeper all live in one public repository, and every deploy is built from it by GitHub Actions. The repository's build also runs the program against a local Solana validator before anything ships.</p>
+        <div class="repo">
+          <div>
+            <div class="name">SolCache/cache</div>
+            <p><code>programs/cache</code> onchain program (Anchor) · <code>web</code> site, app and keeper · <code>.github/workflows</code> build and deploy</p>
+          </div>
+          <a class="btn btn-primary" href="https://github.com/SolCache/cache" target="_blank" rel="noopener">Open on GitHub</a>
+        </div>
+      </section>
+    </article>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>© 2026 Cache · solcache.app</span>
+    <nav aria-label="Footer"><a href="/">Home</a><a href="/app">App</a><a href="https://github.com/SolCache/cache" target="_blank" rel="noopener">GitHub</a></nav>
+  </div>
+</footer>
+</body>
+</html>

@@ -168,8 +168,11 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
     const keeper = keeperKeypair(env).publicKey;
     const bal = await rpc(env, "getBalance", [keeper.toBase58(), { commitment: "confirmed" }]);
     const users = await env.DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
-    const logs = await env.DB.prepare("SELECT ts, wallet, level, message FROM logs ORDER BY id DESC LIMIT 20").all();
-    return json({ keeper: keeper.toBase58(), keeperSol: bal.value / 1e9, users: users?.n ?? 0, logs: logs.results });
+    const logs = await env.DB.prepare("SELECT ts, wallet, level, message FROM logs ORDER BY id DESC LIMIT 20").all<{ ts: number; wallet: string; level: string; message: string }>();
+    // Public endpoint: never expose which wallets use Cache. Addresses are shortened to first4…last4.
+    const mask = (s: string) => s.replace(/[1-9A-HJ-NP-Za-km-z]{32,44}/g, (a) => `${a.slice(0, 4)}…${a.slice(-4)}`);
+    const safe = (logs.results ?? []).map((l) => ({ ts: l.ts, level: l.level, wallet: l.wallet ? mask(l.wallet) : null, message: mask(String(l.message ?? "")).slice(0, 300) }));
+    return json({ keeper: keeper.toBase58(), keeperSol: bal.value / 1e9, users: users?.n ?? 0, logs: safe });
   }
 
   return json({ error: "Not found" }, 404);

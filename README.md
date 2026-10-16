@@ -1,14 +1,18 @@
+<p align="center"><img src="brand/logo.svg" width="96" alt="Cache"></p>
+
 # Cache
 
 Round-ups from every Solana trade, invested into xStocks (tokenized stocks), straight into your own wallet.
 
-> **Mainnet test of unaudited software.** Use a wallet with a small amount of USDC. xStocks are not available to US persons.
+**[solcache.app](https://solcache.app)** · **[Docs](https://solcache.app/docs)**
+
+> **Mainnet test of unaudited software.** Use a wallet with only a small amount in it. xStocks are not available to US persons.
 
 ## How it works
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| `programs/cache` | Solana mainnet (Anchor) | Holds each user's settings in a vault PDA. The user approves the vault as a USDC delegate. Only the keeper can sweep, and every sweep is checked onchain: weekly cap, the user's own destination account, one of the user's picks, a minimum output, and that only Jupiter swap instructions sit between `begin_sweep` and `end_sweep`. |
+| `programs/cache` | Solana mainnet (Anchor) | Holds each user's settings in a vault PDA. The user approves the vault as delegate on their funding account (USDC, or a wrapped-SOL "Cache SOL" account they own). Only the keeper can sweep, and every sweep is checked onchain: weekly cap, the user's own destination account, one of the user's picks, a minimum output, and that only Jupiter swap instructions sit between `begin_sweep` and `end_sweep`. |
 | `web/worker` | Cloudflare Worker + D1 | Serves the site, polls Helius every 15 minutes for each user's swaps, records round-ups, and sweeps them daily at 12:00 UTC (or on "Sweep now") through Jupiter. |
 | `web/index.html`, `web/app.html` | Cloudflare (static assets) | Landing page and the app: connect wallet, one-signature setup, dashboard. |
 | `.github/workflows/deploy.yml` | GitHub Actions | Builds and deploys everything. No local tools needed. |

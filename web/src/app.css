@@ -32,6 +32,9 @@ p{margin:0}
 .brand .tile{width:34px}
 .beta{color:var(--teal);border:1px solid #22F2CC55;border-radius:999px;padding:3px 8px}
 .spacer{flex:1}
+.hdr-link{color:var(--muted);text-decoration:none;font-weight:600;font-size:15px}
+.hdr-link:hover{color:var(--fg)}
+@media (max-width:480px){.hdr-link{display:none}}
 
 main{padding-block:32px 80px;display:flex;flex-direction:column;gap:20px}
 .card{background:var(--bg-2);border:1px solid var(--line);border-radius:22px;padding:28px}
