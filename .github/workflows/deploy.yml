@@ -28,6 +28,10 @@ on:
         description: "SOL to send the keeper during init (0 = none)"
         type: string
         default: "0"
+      workers_subdomain:
+        description: "Change the account's workers.dev subdomain to this (blank = leave it)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -312,6 +316,15 @@ jobs:
         run: |
           [ -f ../deploy/program-id.txt ] || { echo "::error::Deploy the program first."; exit 1; }
           sed -i "s/__PROGRAM_ID__/$(cat ../deploy/program-id.txt)/" wrangler.toml
+      - name: Change workers.dev subdomain
+        if: ${{ inputs.workers_subdomain != '' }}
+        env:
+          SUB: ${{ inputs.workers_subdomain }}
+        run: |
+          curl -sS -X PUT "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
+            --data "{\"subdomain\":\"$SUB\"}" | python3 -c 'import sys,json; r=json.load(sys.stdin); print(json.dumps(r.get("result") or r.get("errors"))); sys.exit(0 if r.get("success") else 1)'
+
       - name: Deploy worker
         run: |
           npx wrangler deploy 2>&1 | tee deploy.log

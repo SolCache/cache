@@ -30,7 +30,12 @@ const now = () => Math.floor(Date.now() / 1000);
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(req);
+    if (!url.pathname.startsWith("/api/")) {
+      const res = await env.ASSETS.fetch(req);
+      if (res.status !== 404) return res;
+      const page = await env.ASSETS.fetch(new Request(new URL("/404.html", url), req));
+      return new Response(page.body, { status: 404, headers: page.headers });
+    }
     try {
       return await route(req, url, env, ctx);
     } catch (e: any) {
