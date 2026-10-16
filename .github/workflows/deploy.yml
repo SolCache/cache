@@ -109,9 +109,10 @@ jobs:
         run: |
           git config user.name "cache-deploy-bot"
           git config user.email "actions@users.noreply.github.com"
+          git status --short
           git add Cargo.lock
           git commit -m "Pin Rust dependencies for the Solana toolchain"
-          git pull --rebase origin main
+          git pull --rebase --autostash origin main
           git push origin HEAD:main
 
       - name: Report deploy cost (read-only)
@@ -253,7 +254,7 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add deploy programs/cache/src/lib.rs Anchor.toml
           git commit -m "Deploy program $PROGRAM_ID" || exit 0
-          git pull --rebase origin main
+          git pull --rebase --autostash origin main
           git push origin HEAD:main
 
   deploy-site:
@@ -306,7 +307,7 @@ jobs:
             git config user.email "actions@users.noreply.github.com"
             git add ../deploy/keeper-pubkey.txt
             git commit -m "Create keeper $(cat ../deploy/keeper-pubkey.txt)"
-            git pull --rebase origin main
+            git pull --rebase --autostash origin main
             git push origin HEAD:main
           fi
           echo "Keeper: $(cat ../deploy/keeper-pubkey.txt)"
