@@ -318,6 +318,7 @@ jobs:
           sed -i "s/__PROGRAM_ID__/$(cat ../deploy/program-id.txt)/" wrangler.toml
       - name: Change workers.dev subdomain
         if: ${{ inputs.workers_subdomain != '' }}
+        continue-on-error: true
         env:
           SUB: ${{ inputs.workers_subdomain }}
         run: |
