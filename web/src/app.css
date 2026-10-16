@@ -24,7 +24,7 @@ p{margin:0}
 .muted{color:var(--muted)}
 .dim{color:var(--dim)}
 .grad-text{background:var(--grad-rev);-webkit-background-clip:text;background-clip:text;color:transparent}
-.tile{display:inline-block;background:url(/tile.png) center/contain no-repeat;image-rendering:pixelated;aspect-ratio:320/250}
+.tile{display:inline-block;background:url(/logo.svg) center/contain no-repeat;aspect-ratio:1/1}
 
 .header{position:sticky;top:0;z-index:20;background:#05050ACC;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .bar{display:flex;align-items:center;gap:14px;height:64px}

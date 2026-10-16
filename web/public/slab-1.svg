@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="9 9 46 29">
+  <defs>
+    <linearGradient id="t" gradientUnits="userSpaceOnUse" x1="10" y1="12" x2="54" y2="32"><stop offset="0" stop-color="#22F2CC"/><stop offset="0.55" stop-color="#3D7CFF"/><stop offset="1" stop-color="#9B4DFF"/></linearGradient>
+    <linearGradient id="s" gradientUnits="userSpaceOnUse" x1="10" y1="26" x2="54" y2="26"><stop offset="0" stop-color="#0E8C78"/><stop offset="0.5" stop-color="#1F47A8"/><stop offset="1" stop-color="#5A2BA8"/></linearGradient>
+  </defs>
+  <g stroke-linejoin="round" stroke-width="1.5">
+    <polygon points="32,10 54,21 32,32 10,21" fill="#E246F5" stroke="#E246F5"/>
+    <polygon points="10,21 32,32 54,21 54,26 32,37 10,26" fill="#7E1F8E" stroke="#7E1F8E"/>
+  </g>
+</svg>

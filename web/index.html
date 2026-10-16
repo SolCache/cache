@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<link rel="icon" href="/tile.png">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#05050A">
 <title>Cache</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,7 +37,7 @@
   --r-sm: 10px;
   --r-md: 18px;
   --r-lg: 28px;
-  --tile: url(/tile.png);
+  --tile: url(/logo.svg);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
@@ -51,7 +54,7 @@ button{font:inherit;color:inherit}
 @media (min-width:760px){.wrap{padding-left:max(32px, env(safe-area-inset-left,0px));padding-right:max(32px, env(safe-area-inset-right,0px))}}
 .grad-text{background:var(--grad-rev);-webkit-background-clip:text;background-clip:text;color:transparent}
 .pixel{font-family:var(--font-body);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
-.tile{background:var(--tile) center/contain no-repeat;image-rendering:pixelated;aspect-ratio:320/250}
+.tile{background:var(--tile) center/contain no-repeat;aspect-ratio:1/1}
 
 /* Buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:999px;font-weight:700;font-size:15px;padding:13px 24px;cursor:pointer;text-decoration:none;transition:transform .15s ease, box-shadow .2s ease, background .2s ease;white-space:nowrap}
@@ -350,14 +353,13 @@ input[type=range]::-moz-range-thumb{width:24px;height:24px;border-radius:50%;bac
 .cta h2{font-size:clamp(40px,6vw,80px);font-weight:800;line-height:.98;letter-spacing:-0.045em}
 .cta p{color:var(--muted);font-size:18px;margin:18px 0 30px;max-width:30em}
 .tower{position:relative;height:300px;max-width:100%}
-.tower .tile{position:absolute;left:50%;width:220px;max-width:90%;transform:translateX(-50%);filter:drop-shadow(0 20px 26px #0009)}
-.tower .tile:nth-child(1){bottom:0}
-.tower .tile:nth-child(2){bottom:38px}
-.tower .tile:nth-child(3){bottom:76px}
-.tower .tile:nth-child(4){bottom:114px;animation:drop 3.6s ease-in-out infinite}
+.tower .slab{position:absolute;left:50%;width:240px;max-width:90%;aspect-ratio:46/29;transform:translateX(-50%);background:center/contain no-repeat;filter:drop-shadow(0 18px 24px #0009)}
+.tower .slab:nth-child(1){bottom:40px;background-image:url(/slab-1.svg)}
+.tower .slab:nth-child(2){bottom:82px;background-image:url(/slab-2.svg)}
+.tower .slab:nth-child(3){bottom:124px;background-image:url(/slab-3.svg);animation:drop 3.6s ease-in-out infinite}
 @keyframes drop{0%,15%{transform:translate(-50%,-120px);opacity:0}45%,100%{transform:translate(-50%,0);opacity:1}}
-@media (prefers-reduced-motion: reduce){.tower .tile:nth-child(4){animation:none}}
-@media (max-width:860px){.cta{grid-template-columns:1fr;padding:36px 24px}.tower{height:230px}.tower .tile{width:170px}}
+@media (prefers-reduced-motion: reduce){.tower .slab:nth-child(3){animation:none}}
+@media (max-width:860px){.cta{grid-template-columns:1fr;padding:36px 24px}.tower{height:230px}.tower .slab{width:180px}.tower .slab:nth-child(1){bottom:24px}.tower .slab:nth-child(2){bottom:55px}.tower .slab:nth-child(3){bottom:86px}}
 
 /* FAQ */
 .faq-grid{display:grid;grid-template-columns:.8fr 1.2fr;gap:56px}
@@ -739,7 +741,7 @@ dialog::backdrop{background:#000000B3;backdrop-filter:blur(6px)}
           <p>Connect your wallet, pick your stocks and let every trade stack something that lasts.</p>
           <button class="btn btn-primary btn-lg" type="button" data-open-onboarding>Get started</button>
         </div>
-        <div class="tower" aria-hidden="true"><span class="tile"></span><span class="tile"></span><span class="tile"></span><span class="tile"></span></div>
+        <div class="tower" aria-hidden="true"><span class="slab"></span><span class="slab"></span><span class="slab"></span></div>
       </div>
     </div>
   </section>
