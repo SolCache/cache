@@ -9,7 +9,7 @@ import { Buffer } from "buffer";
 import { readFileSync } from "node:fs";
 import {
   approveIx, ata, beginSweepIx, cacheSolAccount, closeTokenAccountIx, closeVaultIx, configPda, createAtaIdempotentIx,
-  createCacheSolAccountIxs, addToCacheSolIxs, decodeConfig, decodeTokenAccount, decodeVault, endSweepIx, initConfigIx,
+  createCacheSolAccountIxs, addToCacheSolIxs, withdrawFromCacheSolIxs, decodeConfig, decodeTokenAccount, decodeVault, endSweepIx, initConfigIx,
   initializeVaultIx, revokeIx, TOKEN_PROGRAM_ID, updateVaultIx, USDC_MINT, vaultPda, WSOL_MINT,
 } from "../src/shared/cache";
 
@@ -216,10 +216,18 @@ async function main() {
   await send([...(await addToCacheSolIxs(solUser.publicKey, S(0.5))), approveIx(solAcc, vaultPda(programId, solUser.publicKey), solUser.publicKey, S(1.31))], [solUser]);
   (await balance(solAcc)) === S(1.31) ? ok("top up: 0.5 more SOL wrapped into the Cache SOL account") : bad("SOL top up", `${await balance(solAcc)}`);
 
+  const lamportsBeforeWd = await conn.getBalance(solUser.publicKey);
+  await send([...(await withdrawFromCacheSolIxs(solUser.publicKey, S(0.31), tokenRent)), approveIx(solAcc, vaultPda(programId, solUser.publicKey), solUser.publicKey, S(1))], [solUser]);
+  const gainedWd = (await conn.getBalance(solUser.publicKey)) - lamportsBeforeWd;
+  (await balance(solAcc)) === S(1) && gainedWd > Number(S(0.309))
+    ? ok("withdraw: 0.31 SOL unwrapped back to normal SOL, Cache SOL account stays open") : bad("SOL withdraw", `acc=${await balance(solAcc)} gained=${gainedWd}`);
+  await send(solSweep({ amount: S(0.1), minOut: 1_000n }), [keeper]);
+  (await balance(solAcc)) === S(0.9) ? ok("sweeps keep working after a withdraw") : bad("sweep after withdraw", `${await balance(solAcc)}`);
+
   const solBefore = await conn.getBalance(solUser.publicKey);
   await send([revokeIx(solAcc, solUser.publicKey), closeTokenAccountIx(solAcc, solUser.publicKey, solUser.publicKey), closeVaultIx({ programId, owner: solUser.publicKey })], [solUser]);
   const solAfter = await conn.getBalance(solUser.publicKey);
-  !(await conn.getAccountInfo(solAcc)) && solAfter - solBefore > Number(S(1.3))
+  !(await conn.getAccountInfo(solAcc)) && solAfter - solBefore > Number(S(0.89))
     ? ok("stop: wrapped SOL returned as normal SOL, vault closed") : bad("SOL stop", `gained=${solAfter - solBefore}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
