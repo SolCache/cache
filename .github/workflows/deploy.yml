@@ -1,0 +1,290 @@
+name: Deploy Cache
+
+# Builds and deploys the onchain program (only when its code changed), deploys the site and
+# keeper to Cloudflare, then initializes the program's config. Runs on every push to main,
+# or by hand from the Actions tab.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_program:
+        description: "Redeploy the program even if its code didn't change"
+        type: boolean
+        default: false
+      skip_program:
+        description: "Skip the program job (site and keeper only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-cache
+  cancel-in-progress: false
+
+env:
+  SOLANA_VERSION: "2.1.21"
+  ANCHOR_VERSION: "0.31.1"
+  RPC_URL: https://mainnet.helius-rpc.com/?api-key=${{ secrets.HELIUS_API_KEY }}
+
+jobs:
+  check:
+    name: Check secrets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Required secrets are set
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          for s in DEPLOYER_PRIVATE_KEY HELIUS_API_KEY CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            [ -z "${!s}" ] && missing="$missing $s"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing (Settings → Secrets and variables → Actions)"
+            exit 1
+          fi
+          echo "All required secrets present."
+
+  program:
+    name: Onchain program
+    needs: check
+    if: ${{ !inputs.skip_program }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Did the program change?
+        id: changes
+        run: |
+          HASH=$(find programs -type f \( -name '*.rs' -o -name '*.toml' \) | sort | xargs sha256sum | sha256sum | cut -c1-64)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          if [ -f deploy/program-id.txt ] && [ "$(cat deploy/program-src-hash.txt 2>/dev/null)" = "$HASH" ] && [ "${{ inputs.force_program }}" != "true" ]; then
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Program unchanged since the last deploy; skipping."
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache toolchains
+        if: steps.changes.outputs.deploy == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.cache/solana
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: sol-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-${{ hashFiles('programs/**/Cargo.toml') }}
+
+      - name: Install Solana CLI
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          if [ ! -x "$HOME/.local/share/solana/install/active_release/bin/solana" ]; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          fi
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Install Anchor CLI
+        if: steps.changes.outputs.deploy == 'true'
+        run: npm install -g @coral-xyz/anchor-cli@${ANCHOR_VERSION}
+
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.deploy == 'true'
+        with:
+          node-version: 20
+
+      - name: Deployer wallet
+        if: steps.changes.outputs.deploy == 'true'
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          DEPLOYER=$(npx tsx scripts/deployer-key.ts)
+          echo "DEPLOYER=$DEPLOYER" >> "$GITHUB_ENV"
+          solana config set --url "$RPC_URL" --keypair "$HOME/.config/solana/id.json" > /dev/null
+          echo "Deployer: $DEPLOYER"
+          solana balance
+
+      - name: Program address
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          mkdir -p target/deploy deploy
+          if [ -f deploy/program-id.txt ]; then
+            PROGRAM_ID=$(cat deploy/program-id.txt)
+            echo "FIRST_DEPLOY=false" >> "$GITHUB_ENV"
+          else
+            solana-keygen new --no-bip39-passphrase --silent --force -o target/deploy/cache-keypair.json
+            PROGRAM_ID=$(solana-keygen pubkey target/deploy/cache-keypair.json)
+            echo "FIRST_DEPLOY=true" >> "$GITHUB_ENV"
+          fi
+          sed -i "s/declare_id!(\"[^\"]*\")/declare_id!(\"$PROGRAM_ID\")/" programs/cache/src/lib.rs
+          sed -i "s/^cache = \".*\"/cache = \"$PROGRAM_ID\"/" Anchor.toml
+          echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
+          echo "Program ID: $PROGRAM_ID"
+
+      - name: Build
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          anchor build --no-idl
+          ls -la target/deploy
+
+      - name: Check deployer has enough SOL
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          SIZE=$(stat -c%s target/deploy/cache.so)
+          RENT=$(solana rent $((SIZE + 45)) --lamports | awk '{print $(NF-1)}')
+          BUFFER=$(solana rent $((SIZE + 37)) --lamports | awk '{print $(NF-1)}')
+          BAL=$(solana balance --lamports | awk '{print $1}')
+          if [ "$FIRST_DEPLOY" = "true" ]; then NEED=$((RENT + BUFFER + 50000000)); else NEED=$((BUFFER + 50000000)); fi
+          SOL() { awk -v l="$1" 'BEGIN{printf "%.3f", l/1e9}'; }
+          echo "Program size: $SIZE bytes"
+          echo "Locked as program rent: $(SOL $RENT) SOL (refundable if the program is closed)"
+          echo "Needed in the deployer wallet now: $(SOL $NEED) SOL (the upload buffer is refunded right after)"
+          echo "Deployer balance: $(SOL $BAL) SOL"
+          {
+            echo "### Program deploy cost"
+            echo "- Size: $SIZE bytes"
+            echo "- Needed now in \`$DEPLOYER\`: **$(SOL $NEED) SOL**"
+            echo "- Stays locked as rent: $(SOL $RENT) SOL (refundable)"
+            echo "- Current balance: $(SOL $BAL) SOL"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$BAL" -lt "$NEED" ]; then
+            echo "::error::Fund the deployer wallet $DEPLOYER with at least $(SOL $((NEED - BAL))) more SOL, then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Deploy program
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          if [ "$FIRST_DEPLOY" = "true" ]; then
+            solana program deploy target/deploy/cache.so --program-id target/deploy/cache-keypair.json \
+              --with-compute-unit-price 200000 --max-sign-attempts 100 --use-rpc
+          else
+            SIZE=$(stat -c%s target/deploy/cache.so)
+            CUR=$(solana program show "$PROGRAM_ID" --output json | python3 -c 'import sys,json; print(json.load(sys.stdin)["dataLen"])')
+            if [ "$SIZE" -gt "$CUR" ]; then
+              solana program extend "$PROGRAM_ID" $((SIZE - CUR + 2048))
+            fi
+            solana program deploy target/deploy/cache.so --program-id "$PROGRAM_ID" \
+              --with-compute-unit-price 200000 --max-sign-attempts 100 --use-rpc
+          fi
+          solana program show "$PROGRAM_ID"
+
+      - name: Recover SOL from a failed upload
+        if: failure() && steps.changes.outputs.deploy == 'true'
+        run: solana program close --buffers || true
+
+      - name: Record deployment
+        if: steps.changes.outputs.deploy == 'true'
+        run: |
+          echo "$PROGRAM_ID" > deploy/program-id.txt
+          HASH=$(find programs -type f \( -name '*.rs' -o -name '*.toml' \) | sort | xargs sha256sum | sha256sum | cut -c1-64)
+          echo "$HASH" > deploy/program-src-hash.txt
+          git config user.name "cache-deploy-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add deploy programs/cache/src/lib.rs Anchor.toml
+          git commit -m "Deploy program $PROGRAM_ID" || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+  web:
+    name: Site and keeper (Cloudflare)
+    needs: [check, program]
+    if: ${{ always() && needs.check.result == 'success' && (needs.program.result == 'success' || needs.program.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build site
+        run: npx vite build
+
+      - name: Database
+        run: |
+          ID=$(npx wrangler d1 list --json | python3 -c 'import sys,json; print(next((d["uuid"] for d in json.load(sys.stdin) if d["name"]=="cache"), ""))')
+          if [ -z "$ID" ]; then
+            npx wrangler d1 create cache
+            ID=$(npx wrangler d1 list --json | python3 -c 'import sys,json; print(next((d["uuid"] for d in json.load(sys.stdin) if d["name"]=="cache"), ""))')
+          fi
+          [ -n "$ID" ] || { echo "::error::Could not create or find the D1 database"; exit 1; }
+          sed -i "s/__D1_ID__/$ID/" wrangler.toml
+          npx wrangler d1 execute cache --remote --file=worker/schema.sql --yes
+
+      - name: Configure
+        run: |
+          if [ ! -f ../deploy/program-id.txt ]; then
+            echo "::error::No program deployed yet. Run this workflow with the program job enabled first."
+            exit 1
+          fi
+          sed -i "s/__PROGRAM_ID__/$(cat ../deploy/program-id.txt)/" wrangler.toml
+
+      - name: Deploy worker
+        id: deploy
+        run: |
+          npx wrangler deploy 2>&1 | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Cache is live: $URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "App: $URL/app" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Secrets
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          JUPITER_API_KEY: ${{ secrets.JUPITER_API_KEY }}
+        run: |
+          printf '%s' "$HELIUS_API_KEY" | npx wrangler secret put HELIUS_API_KEY
+          if [ -n "$JUPITER_API_KEY" ]; then printf '%s' "$JUPITER_API_KEY" | npx wrangler secret put JUPITER_API_KEY; fi
+          if [ ! -f ../deploy/keeper-pubkey.txt ]; then
+            npx tsx scripts/keeper-keygen.ts | npx wrangler secret put KEEPER_SECRET_KEY
+            git config user.name "cache-deploy-bot"
+            git config user.email "actions@users.noreply.github.com"
+            git add ../deploy/keeper-pubkey.txt
+            git commit -m "Create keeper $(cat ../deploy/keeper-pubkey.txt)"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+          echo "Keeper: $(cat ../deploy/keeper-pubkey.txt)"
+
+  init:
+    name: Initialize program config
+    needs: web
+    if: ${{ always() && needs.web.result == 'success' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Init or update config
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+        run: npx tsx scripts/init-config.ts

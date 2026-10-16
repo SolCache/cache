@@ -1,0 +1,25 @@
+{
+  "name": "cache-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p worker/tsconfig.json",
+    "deploy": "vite build && wrangler deploy",
+    "init-config": "tsx scripts/init-config.ts",
+    "keeper-keygen": "tsx scripts/keeper-keygen.ts",
+    "deployer-key": "tsx scripts/deployer-key.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "1.98.0",
+    "bs58": "6.0.0",
+    "buffer": "6.0.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20250405.0",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "wrangler": "4.14.0",
+    "tsx": "4.19.2"
+  }
+}

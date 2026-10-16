@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cache app</title>
+<link rel="icon" href="/tile.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Silkscreen&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/src/app.css">
+</head>
+<body>
+<header class="header">
+  <div class="wrap bar">
+    <a class="brand" href="/"><span class="tile" aria-hidden="true"></span>Cache</a>
+    <span class="beta pixel">Mainnet test</span>
+    <div class="spacer"></div>
+    <div id="walletSlot"></div>
+  </div>
+</header>
+<main class="wrap" id="main">
+  <section class="card center"><p class="muted">Loading Cache…</p></section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="/src/app.ts"></script>
+</body>
+</html>
