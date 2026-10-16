@@ -86,6 +86,8 @@ jobs:
           if [ ! -f Cargo.lock ]; then
             rustup toolchain install stable --profile minimal
             CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo +stable generate-lockfile
+            # Crates that don't declare their Rust version but need edition 2024:
+            cargo +stable update -p blake3 --precise 1.5.5
             echo "NEW_LOCKFILE=true" >> "$GITHUB_ENV"
           fi
 
@@ -97,7 +99,7 @@ jobs:
       - name: Explain too-new dependencies
         if: failure()
         run: |
-          for c in block-buffer digest cpufeatures sha2 crypto-common hybrid-array; do
+          for c in hybrid-array@0.4.15 digest@0.11.3 cpufeatures@0.3.1 crypto-common@0.2.2; do
             echo "=== $c ==="; cargo +stable tree -i "$c" -e normal --target all 2>&1 | head -40 || true
           done
           grep -A2 -E '^name = "(block-buffer|digest|sha2|crypto-common|hybrid-array|cpufeatures)"' Cargo.lock || true
