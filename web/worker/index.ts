@@ -299,7 +299,7 @@ async function sweepWallet(env: Env, wallet: string) {
     ? picks.map((m, i) => ({ mint: m, usd: i === picks.length - 1 ? Math.round((amountUsd - Math.floor(perPick * 100) / 100 * (picks.length - 1)) * 100) / 100 : Math.floor(perPick * 100) / 100 }))
     : [{ mint: picks[Number(vault.sweepCount % BigInt(picks.length))], usd: amountUsd }];
 
-  const results = [];
+  const results: any[] = [];
   for (const leg of legs) {
     results.push(await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd));
   }
