@@ -56,6 +56,7 @@ jobs:
           echo "ZONE_ID=$zone"
           echo "ZONE_STATUS=$status"
           echo "NAMESERVERS=$ns"
+          echo "::notice::zone=$status nameservers=$ns"
           {
             echo "### $DOMAIN"
             echo "- Zone status: **$status**"
@@ -79,7 +80,7 @@ jobs:
           for host in "$DOMAIN" "www.$DOMAIN"; do
             echo "Attaching $host to $WORKER"
             r=$(api PUT "/accounts/$CF_ACCOUNT/workers/domains" "{\"environment\":\"production\",\"hostname\":\"$host\",\"service\":\"$WORKER\",\"zone_id\":\"$zone\"}")
-            if ok "$r"; then echo "  attached"; echo "- $host → $WORKER ✅" >> "$GITHUB_STEP_SUMMARY"
+            if ok "$r"; then echo "::notice::$host attached to $WORKER"; echo "- $host → $WORKER ✅" >> "$GITHUB_STEP_SUMMARY"
             else echo "::error::Attaching $host failed: $(errs "$r")"; exit 1; fi
           done
 
@@ -90,7 +91,7 @@ jobs:
           for i in $(seq 1 20); do
             code=$(curl -sS -o /tmp/h.json -w '%{http_code}' "https://$DOMAIN/api/health" || true)
             if [ "$code" = "200" ]; then
-              echo "https://$DOMAIN/api/health → 200"; cat /tmp/h.json; echo
+              echo "::notice::https://$DOMAIN/api/health 200 $(head -c 300 /tmp/h.json)"
               curl -sSI "https://$DOMAIN/" | head -5
               curl -sSI "https://www.$DOMAIN/" | head -3 || true
               echo "- https://$DOMAIN is live ✅" >> "$GITHUB_STEP_SUMMARY"
