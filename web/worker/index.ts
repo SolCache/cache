@@ -20,6 +20,7 @@ export interface Env {
   JUPITER_API_KEY?: string;
   MIN_SWEEP_USD?: string;
   SLIPPAGE_BPS?: string;
+  SELL_SLIPPAGE_BPS?: string;
 }
 
 const STABLES = new Set([USDC_MINT.toBase58(), USDT_MINT.toBase58()]);
@@ -132,20 +133,24 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
   // Sell every xStock the wallet holds for USDC. Preview returns quotes; build returns unsigned swap
   // transactions for the user to sign in their own wallet (Cache never touches these funds).
   if (p === "/api/sell" && req.method === "POST") {
-    const { wallet, build } = (await req.json()) as { wallet: string; build?: boolean };
+    const { wallet, build, mints } = (await req.json()) as { wallet: string; build?: boolean; mints?: string[] };
     const owner = new PublicKey(wallet);
     const atas = STOCKS.map((s) => ata(owner, new PublicKey(s.mint), TOKEN_2022));
     const accs = await getAccounts(env, atas);
-    const held = STOCKS.map((s, i) => ({ s, amount: accs[i] ? decodeTokenAccount(accs[i]!.data).amount : 0n })).filter((h) => h.amount > 0n);
+    const held = STOCKS.map((s, i) => ({ s, amount: accs[i] ? decodeTokenAccount(accs[i]!.data).amount : 0n }))
+      .filter((h) => h.amount > 0n && (!mints?.length || mints.includes(h.s.mint)));
+    const sellSlippage = env.SELL_SLIPPAGE_BPS ?? "300";
     const legs: any[] = [];
     for (const { s, amount } of held) {
       try {
-        const quote = await jup(env, `/swap/v1/quote?inputMint=${s.mint}&outputMint=${USDC_MINT.toBase58()}&amount=${amount}&slippageBps=${env.SLIPPAGE_BPS ?? "100"}&restrictIntermediateTokens=true`);
+        const quote = await jup(env, `/swap/v1/quote?inputMint=${s.mint}&outputMint=${USDC_MINT.toBase58()}&amount=${amount}&slippageBps=${sellSlippage}&restrictIntermediateTokens=true`);
         if (!quote?.outAmount) throw new Error("No route");
         const leg: any = { mint: s.mint, symbol: s.symbol, amount: amount.toString(), usdcOut: Number(quote.outAmount) / 1e6 };
         if (build) {
           const swap = await jup(env, "/swap/v1/swap", {
             quoteResponse: quote, userPublicKey: wallet, wrapAndUnwrapSol: false, dynamicComputeUnitLimit: true,
+            // Thin xStock pools move between quoting and signing; let Jupiter size slippage from a simulation, up to the cap.
+            dynamicSlippage: true,
             prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 300000, priorityLevel: "high" } },
           });
           if (!swap?.swapTransaction) throw new Error(swap?.error ?? "Jupiter didn't return a transaction");

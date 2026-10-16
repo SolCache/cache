@@ -230,36 +230,66 @@ async function stopCache() {
   await refresh();
 }
 
-async function previewConvert() {
+const SWAP_ERRORS: Record<string, string> = {
+  "0x1771": "Price moved more than the slippage limit",
+  "0x1": "Not enough funds for the swap",
+};
+function swapError(e: any) {
+  const msg = String(e?.message ?? e);
+  const code = msg.match(/custom program error: (0x[0-9a-f]+)/i)?.[1]?.toLowerCase();
+  if (code && SWAP_ERRORS[code]) return SWAP_ERRORS[code];
+  if (/blockhash/i.test(msg)) return "Took too long to sign; retry";
+  if (/rejected|denied|cancel/i.test(msg)) return "Cancelled in wallet";
+  return msg.replace(/^sendTransaction: /, "").slice(0, 120);
+}
+
+async function previewConvert(mints?: string[]) {
   if (!owner) return;
-  const r = await api<{ legs: SellLeg[]; totalUsdc: number }>("/api/sell", { wallet: owner.toBase58() });
-  if (!r.legs.length) { toast("You don't hold any xStocks yet."); return; }
+  const r = await api<{ legs: SellLeg[]; totalUsdc: number }>("/api/sell", { wallet: owner.toBase58(), mints });
+  if (!r.legs.length) { toast("You don't hold any xStocks yet."); convert = null; return; }
   convert = r;
 }
 
+/** Builds fresh swaps at confirm time, signs them together, and sends each one independently. */
 async function confirmConvert() {
-  if (!owner || !provider) return;
-  // Build fresh transactions at confirm time so their blockhash is current.
-  const r = await api<{ legs: SellLeg[] }>("/api/sell", { wallet: owner.toBase58(), build: true });
+  if (!owner || !provider || !convert) return;
+  const wanted = convert.legs.filter((l) => l.status !== "converted").map((l) => l.mint);
+  const r = await api<{ legs: SellLeg[] }>("/api/sell", { wallet: owner.toBase58(), build: true, mints: wanted });
+  const results = new Map<string, SellLeg>(convert.legs.map((l) => [l.mint, { ...l }]));
+  for (const l of r.legs) results.set(l.mint, { ...results.get(l.mint), ...l, status: l.tx ? "pending" : "failed", error: l.tx ? undefined : l.error });
   const legs = r.legs.filter((l) => l.tx);
-  if (!legs.length) throw new Error(r.legs[0]?.error ?? "No routes to USDC right now; try again shortly.");
-  const txs = legs.map((l) => VersionedTransaction.deserialize(Uint8Array.from(atob(l.tx!), (c) => c.charCodeAt(0))));
-  toast(`Approve ${txs.length} swap${txs.length === 1 ? "" : "s"} in your wallet…`);
-  const signed: VersionedTransaction[] = provider.signAllTransactions ? await provider.signAllTransactions(txs) : await Promise.all(txs.map((t) => provider.signTransaction(t)));
-  const sigs: string[] = [];
-  for (const t of signed) sigs.push(await rpc("sendTransaction", [btoa(String.fromCharCode(...t.serialize())), { encoding: "base64", maxRetries: 5 }]));
-  toast("Converting to USDC: confirming…");
-  let done = 0, failedCount = 0;
-  for (let i = 0; i < 30 && done + failedCount < sigs.length; i++) {
-    await new Promise((res) => setTimeout(res, 2000));
-    const st = (await rpc("getSignatureStatuses", [sigs])).value ?? [];
-    done = st.filter((x: any) => x && !x.err && (x.confirmationStatus === "confirmed" || x.confirmationStatus === "finalized")).length;
-    failedCount = st.filter((x: any) => x?.err).length;
+  if (legs.length) {
+    const txs = legs.map((l) => VersionedTransaction.deserialize(Uint8Array.from(atob(l.tx!), (c) => c.charCodeAt(0))));
+    toast(`Approve ${txs.length} swap${txs.length === 1 ? "" : "s"} in your wallet…`);
+    const signed: VersionedTransaction[] = provider.signAllTransactions ? await provider.signAllTransactions(txs) : await Promise.all(txs.map((t) => provider.signTransaction(t)));
+    const sent: { mint: string; sig: string }[] = [];
+    await Promise.all(signed.map(async (t, i) => {
+      try {
+        const sig = await rpc("sendTransaction", [btoa(String.fromCharCode(...t.serialize())), { encoding: "base64", maxRetries: 5 }]);
+        sent.push({ mint: legs[i].mint, sig });
+      } catch (e) {
+        results.set(legs[i].mint, { ...results.get(legs[i].mint)!, status: "failed", error: swapError(e) });
+      }
+    }));
+    toast("Converting to USDC: confirming…");
+    for (let i = 0; i < 25 && sent.some((x) => results.get(x.mint)!.status === "pending"); i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      const st = (await rpc("getSignatureStatuses", [sent.map((x) => x.sig)])).value ?? [];
+      sent.forEach((x, j) => {
+        const s = st[j];
+        if (s?.err) results.set(x.mint, { ...results.get(x.mint)!, status: "failed", error: swapError(JSON.stringify(s.err)) });
+        else if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) results.set(x.mint, { ...results.get(x.mint)!, status: "converted", tx: x.sig });
+      });
+    }
+    sent.forEach((x) => { if (results.get(x.mint)!.status === "pending") results.set(x.mint, { ...results.get(x.mint)!, status: "failed", error: "Didn't land in time; retry" }); });
   }
-  convert = null;
-  const skipped = r.legs.length - legs.length;
-  toast(`Converted ${done} of ${r.legs.length} to USDC.${failedCount ? ` ${failedCount} failed.` : ""}${skipped ? ` ${skipped} had no route.` : ""} <a href="${solscan(sigs[0])}" target="_blank" rel="noopener">View on Solscan</a>`, failedCount > 0 || done < legs.length);
-  await refresh();
+  const all = [...results.values()];
+  convert = { legs: all, totalUsdc: all.reduce((a, l) => a + (l.usdcOut ?? 0), 0), done: true };
+  const ok = all.filter((l) => l.status === "converted").length;
+  const failed = all.filter((l) => l.status === "failed").length;
+  toast(failed ? `Converted ${ok} of ${all.length}. Use “Retry failed” for the rest.` : `All ${ok} converted to USDC.`, failed > 0);
+  if (owner && state?.vault) await loadHoldings(state.vault.picks).catch(() => {});
+  if (!failed) setTimeout(() => { convert = null; render(); }, 6000);
 }
 
 async function sweepNow() {
@@ -288,8 +318,8 @@ async function sweepNow() {
 // ---------------------------------------------------------------- data
 
 let holdings: { symbol: string; amount: number }[] = [];
-type SellLeg = { mint: string; symbol: string; amount: string; usdcOut?: number; tx?: string; error?: string };
-let convert: null | { legs: SellLeg[]; totalUsdc: number } = null;
+type SellLeg = { mint: string; symbol: string; amount: string; usdcOut?: number; tx?: string; error?: string; status?: "converted" | "failed" | "pending" };
+let convert: null | { legs: SellLeg[]; totalUsdc: number; done?: boolean } = null;
 
 async function refresh() {
   if (!owner) return render();
@@ -442,11 +472,20 @@ function dashboardView() {
       <button class="btn btn-danger" data-act="stop" ${busy ? "disabled" : ""}>Stop Cache</button>
     </div>
     ${convert ? `<div class="summary">
-      ${convert.legs.map((l) => `<div><span>${esc(l.symbol)}</span><b>${l.error ? `<span class="dim">${esc(l.error)}</span>` : `≈ ${money(l.usdcOut ?? 0)}`}</b></div>`).join("")}
-      <div><span>You'll receive about</span><b class="mono">${money(convert.totalUsdc)} USDC</b></div>
+      ${convert.legs.map((l) => `<div><span>${esc(l.symbol)}</span><b>${
+        l.status === "converted" ? `<a href="${solscan(l.tx!)}" target="_blank" rel="noopener" style="color:var(--good)">Converted ≈ ${money(l.usdcOut ?? 0)}</a>`
+        : l.status === "failed" ? `<span style="color:var(--bad)">Failed: ${esc(l.error ?? "")}</span>`
+        : l.status === "pending" ? `<span class="dim">Confirming…</span>`
+        : l.error ? `<span class="dim">${esc(l.error)}</span>` : `≈ ${money(l.usdcOut ?? 0)}`}</b></div>`).join("")}
+      ${convert.done ? "" : `<div><span>You'll receive about</span><b class="mono">${money(convert.totalUsdc)} USDC</b></div>`}
     </div>
-    <p class="dim" style="font-size:13px">Sells every xStock in this wallet for USDC through Jupiter (up to 1% slippage). You sign each swap in your wallet; Cache never holds these funds.</p>
-    <div class="row"><button class="btn btn-ghost" data-act="cancel-convert">Cancel</button><button class="btn btn-primary" data-act="confirm-convert" ${busy ? "disabled" : ""}>Confirm and sign</button></div>` : ""}
+    ${convert.done ? "" : `<p class="dim" style="font-size:13px">Sells every xStock in this wallet for USDC through Jupiter. Slippage adjusts to each pool, up to 3%. You sign the swaps in your wallet; Cache never holds these funds.</p>`}
+    <div class="row">
+      <button class="btn btn-ghost" data-act="cancel-convert">${convert.done ? "Close" : "Cancel"}</button>
+      ${convert.done
+        ? (convert.legs.some((l) => l.status === "failed") ? `<button class="btn btn-primary" data-act="confirm-convert" ${busy ? "disabled" : ""}>Retry failed (${convert.legs.filter((l) => l.status === "failed").length})</button>` : "")
+        : `<button class="btn btn-primary" data-act="confirm-convert" ${busy ? "disabled" : ""}>Confirm and sign</button>`}
+    </div>` : ""}
   </section>
 
   <section class="card stack">
@@ -515,7 +554,7 @@ document.addEventListener("click", (e) => {
   if (act === "resume") return void run(() => setPaused(false));
   if (act === "topup") return void run(topUp);
   if (act === "sweep") return void run(sweepNow);
-  if (act === "convert") return void run(previewConvert);
+  if (act === "convert") return void run(() => previewConvert());
   if (act === "cancel-convert") { convert = null; return render(); }
   if (act === "confirm-convert") return void run(confirmConvert);
   if (act === "stop") {
