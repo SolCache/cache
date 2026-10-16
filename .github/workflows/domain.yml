@@ -1,0 +1,101 @@
+name: Domain
+
+# Puts solcache.app on Cloudflare and attaches it to the site.
+# Safe to run repeatedly: every step checks what already exists first.
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "Domain"
+        type: string
+        default: "solcache.app"
+
+permissions:
+  contents: read
+
+jobs:
+  domain:
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DOMAIN: ${{ inputs.domain }}
+      WORKER: amber-otter-lantern
+    steps:
+      - name: Zone, nameservers, custom domains
+        id: zone
+        run: |
+          set -euo pipefail
+          api() { # method path [json]
+            if [ -n "${3:-}" ]; then
+              curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "$3"
+            else
+              curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN"
+            fi
+          }
+          ok() { jq -e '.success' >/dev/null <<<"$1"; }
+          errs() { jq -c '.errors' <<<"$1"; }
+
+          echo "::group::Token check"
+          r=$(api GET "/user/tokens/verify"); echo "$r" | jq -c '{success, status: .result.status}'
+          echo "::endgroup::"
+
+          r=$(api GET "/zones?name=$DOMAIN&account.id=$CF_ACCOUNT")
+          ok "$r" || { echo "::error::Listing zones failed: $(errs "$r") — the API token needs Zone · Zone · Edit"; exit 1; }
+          zone=$(jq -r '.result[0].id // empty' <<<"$r")
+          if [ -z "$zone" ]; then
+            echo "Adding $DOMAIN to Cloudflare (Free plan)"
+            r=$(api POST "/zones" "{\"name\":\"$DOMAIN\",\"account\":{\"id\":\"$CF_ACCOUNT\"},\"type\":\"full\"}")
+            ok "$r" || { echo "::error::Adding the zone failed: $(errs "$r")"; exit 1; }
+          else
+            r=$(api GET "/zones/$zone")
+          fi
+          zone=$(jq -r '.result.id' <<<"$r")
+          status=$(jq -r '.result.status' <<<"$r")
+          ns=$(jq -r '.result.name_servers | join(" ")' <<<"$r")
+          echo "ZONE_ID=$zone"
+          echo "ZONE_STATUS=$status"
+          echo "NAMESERVERS=$ns"
+          {
+            echo "### $DOMAIN"
+            echo "- Zone status: **$status**"
+            echo "- Cloudflare nameservers: \`$ns\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "active=$([ "$status" = active ] && echo 1 || echo 0)" >> "$GITHUB_OUTPUT"
+          if [ "$status" != "active" ]; then
+            # Ask Cloudflare to look for the new nameservers now instead of waiting for its schedule.
+            api PUT "/zones/$zone/activation_check" | jq -c '{success, errors}' || true
+            echo "Zone is $status — set the nameservers at the registrar, then run this again."
+            exit 0
+          fi
+
+          # Best-effort HTTPS settings (need Zone Settings permission; .app is HTTPS-only in browsers anyway).
+          for s in always_use_https:on automatic_https_rewrites:on min_tls_version:1.2; do
+            k=${s%%:*}; v=${s#*:}
+            api PATCH "/zones/$zone/settings/$k" "{\"value\":\"$v\"}" | jq -c "{setting: \"$k\", success}" || true
+          done
+
+          for host in "$DOMAIN" "www.$DOMAIN"; do
+            echo "Attaching $host to $WORKER"
+            r=$(api PUT "/accounts/$CF_ACCOUNT/workers/domains" "{\"environment\":\"production\",\"hostname\":\"$host\",\"service\":\"$WORKER\",\"zone_id\":\"$zone\"}")
+            if ok "$r"; then echo "  attached"; echo "- $host → $WORKER ✅" >> "$GITHUB_STEP_SUMMARY"
+            else echo "::error::Attaching $host failed: $(errs "$r")"; exit 1; fi
+          done
+
+      - name: Check HTTPS
+        if: ${{ steps.zone.outputs.active == '1' }}
+        run: |
+          set -u
+          for i in $(seq 1 20); do
+            code=$(curl -sS -o /tmp/h.json -w '%{http_code}' "https://$DOMAIN/api/health" || true)
+            if [ "$code" = "200" ]; then
+              echo "https://$DOMAIN/api/health → 200"; cat /tmp/h.json; echo
+              curl -sSI "https://$DOMAIN/" | head -5
+              curl -sSI "https://www.$DOMAIN/" | head -3 || true
+              echo "- https://$DOMAIN is live ✅" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "attempt $i: $code — certificate may still be issuing"; sleep 30
+          done
+          echo "Not serving yet (zone may not be active, or certificate still issuing)."
