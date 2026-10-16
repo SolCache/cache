@@ -121,15 +121,15 @@ jobs:
         run: |
           SIZE=$(stat -c%s target/deploy/cache.so)
           solana config set --url "$RPC_URL" > /dev/null
-          RENT=$(solana rent $((SIZE + 45)) --lamports | awk '{print $(NF-1)}')
-          BUFFER=$(solana rent $((SIZE + 37)) --lamports | awk '{print $(NF-1)}')
+          RENT=$(solana rent $((SIZE + 45)) --lamports | grep -oE '[0-9]+' | head -1)
+          BUFFER=$(solana rent $((SIZE + 37)) --lamports | grep -oE '[0-9]+' | head -1)
           NEED=$((RENT + BUFFER + 50000000))
           SOL() { awk -v l="$1" 'BEGIN{printf "%.3f", l/1e9}'; }
           BAL="unknown"
           if [ -n "$DEPLOYER_PRIVATE_KEY" ]; then
             cd web && npm install --no-audit --no-fund --silent && cd ..
             DEPLOYER=$(cd web && npx tsx scripts/deployer-key.ts /tmp/deployer.json)
-            BAL=$(SOL "$(solana balance "$DEPLOYER" --lamports | awk '{print $1}')")
+            BAL=$(SOL "$(solana balance "$DEPLOYER" --lamports | grep -oE '[0-9]+' | head -1)")
             rm -f /tmp/deployer.json
           fi
           {
@@ -223,9 +223,9 @@ jobs:
       - name: Check balance
         run: |
           SIZE=$(stat -c%s target/deploy/cache.so)
-          RENT=$(solana rent $((SIZE + 45)) --lamports | awk '{print $(NF-1)}')
-          BUFFER=$(solana rent $((SIZE + 37)) --lamports | awk '{print $(NF-1)}')
-          BAL=$(solana balance --lamports | awk '{print $1}')
+          RENT=$(solana rent $((SIZE + 45)) --lamports | grep -oE '[0-9]+' | head -1)
+          BUFFER=$(solana rent $((SIZE + 37)) --lamports | grep -oE '[0-9]+' | head -1)
+          BAL=$(solana balance --lamports | grep -oE '[0-9]+' | head -1)
           if [ "$FIRST_DEPLOY" = "true" ]; then NEED=$((RENT + BUFFER + 50000000)); else NEED=$((BUFFER + 50000000)); fi
           if [ "$BAL" -lt "$NEED" ]; then
             echo "::error::Deployer needs $(awk -v l=$((NEED-BAL)) 'BEGIN{printf "%.3f", l/1e9}') more SOL."
