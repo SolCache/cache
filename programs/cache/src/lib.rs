@@ -1,14 +1,17 @@
 //! Cache: round-ups from every Solana trade, invested into xStocks.
 //!
 //! Security model
-//! - Users keep custody. They approve this program's vault PDA as an SPL delegate on their
-//!   USDC account, up to an allowance they choose.
-//! - Only the configured keeper can start a sweep, and the program enforces, per sweep:
-//!   the weekly cap, a destination owned by the user, a mint the user picked, a minimum
-//!   output, and that the only instructions between `begin_sweep` and `end_sweep` are the
-//!   configured swap program (Jupiter), compute-budget and associated-token instructions.
-//! - The keeper decides *how much* to sweep (round-ups are computed off-chain). The program
-//!   decides *what is allowed*.
+//! - Users keep custody. Each vault is funded from one token account the user owns: their USDC
+//!   account, or a dedicated wrapped-SOL account. The user approves this program's vault PDA as an
+//!   SPL delegate on that account, up to an allowance they choose.
+//! - Only the configured keeper can start a sweep, and the program enforces, per sweep: the weekly
+//!   cap, a destination owned by the user, a mint the user picked, a minimum output, and that the
+//!   only instructions between `begin_sweep` and `end_sweep` are the configured swap program
+//!   (Jupiter), compute-budget and associated-token instructions.
+//! - Anything the swap route doesn't use is refunded to the user inside `end_sweep`, so the keeper
+//!   never ends up holding user funds.
+//! - The keeper decides *how much* to sweep (round-ups are computed off-chain). The program decides
+//!   *what is allowed*.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::sysvar::instructions::{
@@ -23,10 +26,16 @@ declare_id!("GUhLX8WTmUJ9eF2pJxLbUkprfJVvs3JBkyAH6dc6bLj5");
 pub const MAX_PICKS: usize = 5;
 pub const MAX_ALLOWED_MINTS: usize = 24;
 pub const WEEK_SECONDS: i64 = 7 * 24 * 60 * 60;
-/// USDC has 6 decimals.
-pub const MIN_WEEKLY_CAP: u64 = 1_000_000; // $1
-pub const MAX_WEEKLY_CAP: u64 = 100_000 * 1_000_000; // $100,000
 pub const MULTIPLIERS: [u16; 7] = [1, 2, 5, 10, 20, 50, 100];
+
+/// Wrapped SOL, the second funding option next to the config's USDC mint.
+pub const WSOL_MINT: Pubkey = anchor_lang::solana_program::pubkey!("So11111111111111111111111111111111111111112");
+/// USDC caps (6 decimals): $1 to $100,000 per week.
+pub const USDC_MIN_CAP: u64 = 1_000_000;
+pub const USDC_MAX_CAP: u64 = 100_000 * 1_000_000;
+/// SOL caps (9 decimals): 0.01 to 1,000 SOL per week.
+pub const SOL_MIN_CAP: u64 = 10_000_000;
+pub const SOL_MAX_CAP: u64 = 1_000 * 1_000_000_000;
 
 const COMPUTE_BUDGET_PROGRAM_ID: Pubkey =
     anchor_lang::solana_program::pubkey!("ComputeBudget111111111111111111111111111111");
@@ -80,15 +89,29 @@ pub mod cache {
         Ok(())
     }
 
+    /// Creates the user's vault. `funding_account` is the token account sweeps are paid from:
+    /// the user's USDC account or a wrapped-SOL account they own. The weekly cap is in that
+    /// token's base units.
     pub fn initialize_vault(
         ctx: Context<InitializeVault>,
         picks: Vec<Pubkey>,
         weekly_cap: u64,
         multiplier: u16,
     ) -> Result<()> {
-        validate_settings(&ctx.accounts.config, &picks, weekly_cap, multiplier)?;
+        let funding = &ctx.accounts.funding_account;
+        let config = &ctx.accounts.config;
+        require!(
+            funding.mint == config.usdc_mint || funding.mint == WSOL_MINT,
+            CacheError::WrongMint
+        );
+        validate_settings(config, &picks, funding.mint, weekly_cap, multiplier)?;
+        let funding_mint = funding.mint;
+        let funding_key = funding.key();
+
         let vault = &mut ctx.accounts.vault;
         vault.owner = ctx.accounts.owner.key();
+        vault.funding_mint = funding_mint;
+        vault.funding_account = funding_key;
         vault.picks = picks;
         vault.weekly_cap = weekly_cap;
         vault.multiplier = multiplier;
@@ -109,7 +132,8 @@ pub mod cache {
         multiplier: u16,
         paused: bool,
     ) -> Result<()> {
-        validate_settings(&ctx.accounts.config, &picks, weekly_cap, multiplier)?;
+        let funding_mint = ctx.accounts.vault.funding_mint;
+        validate_settings(&ctx.accounts.config, &picks, funding_mint, weekly_cap, multiplier)?;
         let vault = &mut ctx.accounts.vault;
         require!(!vault.sweep_active, CacheError::SweepInProgress);
         vault.picks = picks;
@@ -119,16 +143,16 @@ pub mod cache {
         Ok(())
     }
 
-    /// Closes the vault and refunds its rent. Clients pair this with an SPL `revoke`
-    /// in the same transaction so the delegate approval is removed too.
+    /// Closes the vault and refunds its rent. Clients pair this with an SPL `revoke` (and, for
+    /// SOL vaults, closing the wrapped-SOL account) in the same transaction.
     pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
         require!(!ctx.accounts.vault.sweep_active, CacheError::SweepInProgress);
         Ok(())
     }
 
-    /// Moves `amount` USDC from the user to the keeper's USDC account so the keeper can
-    /// route it through the swap program in the very next instructions. `end_sweep`
-    /// later in the same transaction checks the user received at least `min_out`.
+    /// Moves `amount` of the vault's funding token from the user to the keeper so the keeper can
+    /// route it through the swap program in the very next instructions. `end_sweep` later in the
+    /// same transaction checks the user received at least `min_out` and refunds anything unused.
     pub fn begin_sweep(ctx: Context<BeginSweep>, amount: u64, min_out: u64) -> Result<()> {
         let config = &ctx.accounts.config;
         require!(!config.paused, CacheError::ProgramPaused);
@@ -144,10 +168,7 @@ pub mod cache {
             require_keys_eq!(dest.owner, vault.owner, CacheError::WrongDestination);
         }
 
-        check_sandwich(
-            &ctx.accounts.instructions.to_account_info(),
-            &config.swap_program,
-        )?;
+        check_sandwich(&ctx.accounts.instructions.to_account_info(), &config.swap_program)?;
 
         // Weekly cap, rolling from the first sweep of each period.
         let now = Clock::get()?.unix_timestamp;
@@ -162,7 +183,7 @@ pub mod cache {
         let new_spent = spent.checked_add(amount).ok_or(error!(CacheError::MathOverflow))?;
         require!(new_spent <= ctx.accounts.vault.weekly_cap, CacheError::WeeklyCapExceeded);
 
-        // Pull USDC using the vault PDA's delegate approval.
+        // Pull the funding token using the vault PDA's delegate approval.
         let owner = ctx.accounts.vault.owner;
         let bump_seed = [ctx.accounts.vault.bump];
         let seeds: [&[u8]; 3] = [b"vault", owner.as_ref(), &bump_seed];
@@ -171,8 +192,8 @@ pub mod cache {
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
                 Transfer {
-                    from: ctx.accounts.user_usdc.to_account_info(),
-                    to: ctx.accounts.keeper_usdc.to_account_info(),
+                    from: ctx.accounts.user_source.to_account_info(),
+                    to: ctx.accounts.keeper_source.to_account_info(),
                     authority: ctx.accounts.vault.to_account_info(),
                 },
                 &signer,
@@ -180,8 +201,8 @@ pub mod cache {
             amount,
         )?;
 
-        let keeper_usdc_key = ctx.accounts.keeper_usdc.key();
-        let keeper_usdc_before = ctx.accounts.keeper_usdc.amount; // snapshot taken before the CPI
+        let keeper_source_key = ctx.accounts.keeper_source.key();
+        let keeper_source_before = ctx.accounts.keeper_source.amount; // snapshot taken before the CPI
         let dest_key = ctx.accounts.dest.key();
         let dest_before = ctx.accounts.dest.amount;
 
@@ -193,33 +214,54 @@ pub mod cache {
         vault.sweep_min_out = min_out;
         vault.sweep_dest = dest_key;
         vault.sweep_dest_before = dest_before;
-        vault.sweep_keeper_usdc = keeper_usdc_key;
-        vault.sweep_keeper_usdc_before = keeper_usdc_before;
+        vault.sweep_keeper_source = keeper_source_key;
+        vault.sweep_keeper_source_before = keeper_source_before;
         Ok(())
     }
 
+    /// Checks the user received at least `min_out` of the stock, refunds any of the funding token
+    /// the swap didn't use back to the user, and records the sweep.
     pub fn end_sweep(ctx: Context<EndSweep>) -> Result<()> {
+        require!(ctx.accounts.vault.sweep_active, CacheError::NoSweepInProgress);
         let dest_amount = ctx.accounts.dest.amount;
-        let keeper_usdc_amount = ctx.accounts.keeper_usdc.amount;
         let mint = ctx.accounts.dest.mint;
 
-        let vault = &mut ctx.accounts.vault;
-        require!(vault.sweep_active, CacheError::NoSweepInProgress);
-
         let gained = dest_amount
-            .checked_sub(vault.sweep_dest_before)
+            .checked_sub(ctx.accounts.vault.sweep_dest_before)
             .ok_or(error!(CacheError::SlippageExceeded))?;
-        require!(gained >= vault.sweep_min_out, CacheError::SlippageExceeded);
-        // The keeper must not end up holding any of the user's USDC.
+        require!(gained >= ctx.accounts.vault.sweep_min_out, CacheError::SlippageExceeded);
+
+        // Refund whatever the route left in the keeper's account.
+        let before = ctx.accounts.vault.sweep_keeper_source_before;
+        let leftover = ctx.accounts.keeper_source.amount.saturating_sub(before);
+        let amount = ctx.accounts.vault.sweep_amount;
+        require!(leftover <= amount, CacheError::KeeperKeptFunds);
+        if leftover > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.keeper_source.to_account_info(),
+                        to: ctx.accounts.user_source.to_account_info(),
+                        authority: ctx.accounts.keeper.to_account_info(),
+                    },
+                ),
+                leftover,
+            )?;
+            ctx.accounts.keeper_source.reload()?;
+        }
+        // The keeper must not end up holding any of the user's funds.
         require!(
-            keeper_usdc_amount <= vault.sweep_keeper_usdc_before,
+            ctx.accounts.keeper_source.amount <= before,
             CacheError::KeeperKeptFunds
         );
 
-        let usdc_in = vault.sweep_amount;
+        let used = amount - leftover;
+        let vault = &mut ctx.accounts.vault;
+        vault.spent_in_period = vault.spent_in_period.saturating_sub(leftover);
         vault.total_swept = vault
             .total_swept
-            .checked_add(usdc_in)
+            .checked_add(used)
             .ok_or(error!(CacheError::MathOverflow))?;
         vault.sweep_count = vault.sweep_count.saturating_add(1);
         vault.sweep_active = false;
@@ -228,8 +270,10 @@ pub mod cache {
 
         emit!(SweepCompleted {
             owner: vault.owner,
+            funding_mint: vault.funding_mint,
             mint,
-            usdc_in,
+            amount_in: used,
+            refunded: leftover,
             out_amount: gained,
         });
         Ok(())
@@ -239,6 +283,7 @@ pub mod cache {
 fn validate_settings(
     config: &Config,
     picks: &[Pubkey],
+    funding_mint: Pubkey,
     weekly_cap: u64,
     multiplier: u16,
 ) -> Result<()> {
@@ -247,10 +292,12 @@ fn validate_settings(
         require!(config.allowed_mints.contains(p), CacheError::MintNotAllowed);
         require!(!picks[..i].contains(p), CacheError::InvalidPicks);
     }
-    require!(
-        (MIN_WEEKLY_CAP..=MAX_WEEKLY_CAP).contains(&weekly_cap),
-        CacheError::InvalidCap
-    );
+    let (min, max) = if funding_mint == WSOL_MINT {
+        (SOL_MIN_CAP, SOL_MAX_CAP)
+    } else {
+        (USDC_MIN_CAP, USDC_MAX_CAP)
+    };
+    require!((min..=max).contains(&weekly_cap), CacheError::InvalidCap);
     require!(MULTIPLIERS.contains(&multiplier), CacheError::InvalidMultiplier);
     Ok(())
 }
@@ -330,6 +377,8 @@ pub struct InitializeVault<'info> {
     pub vault: Account<'info, Vault>,
     #[account(mut)]
     pub owner: Signer<'info>,
+    #[account(constraint = funding_account.owner == owner.key() @ CacheError::WrongSource)]
+    pub funding_account: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
 }
 
@@ -357,18 +406,14 @@ pub struct BeginSweep<'info> {
     #[account(mut, seeds = [b"vault", vault.owner.as_ref()], bump = vault.bump)]
     pub vault: Account<'info, Vault>,
     pub keeper: Signer<'info>,
+    #[account(mut, address = vault.funding_account @ CacheError::WrongSource)]
+    pub user_source: Account<'info, TokenAccount>,
     #[account(
         mut,
-        constraint = user_usdc.mint == config.usdc_mint @ CacheError::WrongMint,
-        constraint = user_usdc.owner == vault.owner @ CacheError::WrongSource
+        constraint = keeper_source.mint == vault.funding_mint @ CacheError::WrongMint,
+        constraint = keeper_source.owner == keeper.key() @ CacheError::Unauthorized
     )]
-    pub user_usdc: Account<'info, TokenAccount>,
-    #[account(
-        mut,
-        constraint = keeper_usdc.mint == config.usdc_mint @ CacheError::WrongMint,
-        constraint = keeper_usdc.owner == keeper.key() @ CacheError::Unauthorized
-    )]
-    pub keeper_usdc: Account<'info, TokenAccount>,
+    pub keeper_source: Account<'info, TokenAccount>,
     /// The user's xStock account (Token-2022 or classic SPL).
     pub dest: InterfaceAccount<'info, AnyTokenAccount>,
     pub token_program: Program<'info, Token>,
@@ -384,10 +429,13 @@ pub struct EndSweep<'info> {
     #[account(mut, seeds = [b"vault", vault.owner.as_ref()], bump = vault.bump)]
     pub vault: Account<'info, Vault>,
     pub keeper: Signer<'info>,
-    #[account(address = vault.sweep_keeper_usdc @ CacheError::Unauthorized)]
-    pub keeper_usdc: Account<'info, TokenAccount>,
+    #[account(mut, address = vault.sweep_keeper_source @ CacheError::Unauthorized)]
+    pub keeper_source: Account<'info, TokenAccount>,
     #[account(address = vault.sweep_dest @ CacheError::WrongDestination)]
     pub dest: InterfaceAccount<'info, AnyTokenAccount>,
+    #[account(mut, address = vault.funding_account @ CacheError::WrongSource)]
+    pub user_source: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
 }
 
 // ---------------------------------------------------------------- state
@@ -409,6 +457,8 @@ pub struct Config {
 #[derive(InitSpace)]
 pub struct Vault {
     pub owner: Pubkey,
+    pub funding_mint: Pubkey,
+    pub funding_account: Pubkey,
     #[max_len(5)]
     pub picks: Vec<Pubkey>,
     pub weekly_cap: u64,
@@ -423,16 +473,20 @@ pub struct Vault {
     pub sweep_min_out: u64,
     pub sweep_dest: Pubkey,
     pub sweep_dest_before: u64,
-    pub sweep_keeper_usdc: Pubkey,
-    pub sweep_keeper_usdc_before: u64,
+    pub sweep_keeper_source: Pubkey,
+    pub sweep_keeper_source_before: u64,
     pub bump: u8,
+    /// Room for future fields without breaking existing vaults.
+    pub reserved: [u8; 64],
 }
 
 #[event]
 pub struct SweepCompleted {
     pub owner: Pubkey,
+    pub funding_mint: Pubkey,
     pub mint: Pubkey,
-    pub usdc_in: u64,
+    pub amount_in: u64,
+    pub refunded: u64,
     pub out_amount: u64,
 }
 
@@ -444,7 +498,7 @@ pub enum CacheError {
     TooManyMints,
     #[msg("Pick between 1 and 5 different allowed stocks")]
     InvalidPicks,
-    #[msg("Weekly cap must be between $1 and $100,000")]
+    #[msg("Weekly cap is out of range ($1-$100,000 or 0.01-1,000 SOL)")]
     InvalidCap,
     #[msg("Multiplier must be 1, 2, 5, 10, 20, 50 or 100")]
     InvalidMultiplier,
@@ -464,15 +518,15 @@ pub enum CacheError {
     MintNotAllowed,
     #[msg("Destination must be the user's own token account")]
     WrongDestination,
-    #[msg("Source must be the user's USDC account")]
+    #[msg("Source must be the vault's funding account")]
     WrongSource,
-    #[msg("Wrong token mint")]
+    #[msg("Funding must be USDC or wrapped SOL")]
     WrongMint,
     #[msg("This sweep would exceed the weekly cap")]
     WeeklyCapExceeded,
     #[msg("Received less than the minimum output")]
     SlippageExceeded,
-    #[msg("Keeper kept part of the user's USDC")]
+    #[msg("Keeper kept part of the user's funds")]
     KeeperKeptFunds,
     #[msg("begin_sweep cannot be called from another program")]
     CpiNotAllowed,

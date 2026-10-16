@@ -15,10 +15,15 @@ export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZb
 export const BPF_LOADER_UPGRADEABLE_ID = new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111");
 
 export const USDC_DECIMALS = 6;
+export const SOL_DECIMALS = 9;
+/** Seed for the dedicated wrapped-SOL account a SOL-funded vault draws from. */
+export const CACHE_SOL_SEED = "cache-sol-v1";
 export const MULTIPLIERS = [1, 2, 5, 10, 20, 50, 100] as const;
 export const MAX_PICKS = 5;
 export const MIN_WEEKLY_CAP_USD = 1;
 export const MAX_WEEKLY_CAP_USD = 100_000;
+export const MIN_WEEKLY_CAP_SOL = 0.01;
+export const MAX_WEEKLY_CAP_SOL = 1_000;
 
 /** xStocks offered in v1. Mints from Backed's Solana deployments; the CI setup script
  *  re-checks each one on mainnet (exists, Token-2022) before adding it to the allowlist. */
@@ -184,16 +189,16 @@ export function updateConfigIx(p: {
 }
 
 export function initializeVaultIx(p: {
-  programId: PublicKey; owner: PublicKey; picks: PublicKey[]; weeklyCapUsd: number; multiplier: number;
+  programId: PublicKey; owner: PublicKey; fundingAccount: PublicKey; picks: PublicKey[]; weeklyCap: bigint; multiplier: number;
 }) {
-  const data = new Writer().bytes(DISC.initialize_vault)
-    .pubkeys(p.picks).u64(toUsdcUnits(p.weeklyCapUsd)).u16(p.multiplier).done();
+  const data = new Writer().bytes(DISC.initialize_vault).pubkeys(p.picks).u64(p.weeklyCap).u16(p.multiplier).done();
   return new TransactionInstruction({
     programId: p.programId,
     keys: [
       { pubkey: configPda(p.programId), isSigner: false, isWritable: false },
       { pubkey: vaultPda(p.programId, p.owner), isSigner: false, isWritable: true },
       { pubkey: p.owner, isSigner: true, isWritable: true },
+      { pubkey: p.fundingAccount, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
     data: buf(data),
@@ -201,10 +206,9 @@ export function initializeVaultIx(p: {
 }
 
 export function updateVaultIx(p: {
-  programId: PublicKey; owner: PublicKey; picks: PublicKey[]; weeklyCapUsd: number; multiplier: number; paused: boolean;
+  programId: PublicKey; owner: PublicKey; picks: PublicKey[]; weeklyCap: bigint; multiplier: number; paused: boolean;
 }) {
-  const data = new Writer().bytes(DISC.update_vault)
-    .pubkeys(p.picks).u64(toUsdcUnits(p.weeklyCapUsd)).u16(p.multiplier).bool(p.paused).done();
+  const data = new Writer().bytes(DISC.update_vault).pubkeys(p.picks).u64(p.weeklyCap).u16(p.multiplier).bool(p.paused).done();
   return new TransactionInstruction({
     programId: p.programId,
     keys: [
@@ -228,7 +232,8 @@ export function closeVaultIx(p: { programId: PublicKey; owner: PublicKey }) {
 }
 
 export function beginSweepIx(p: {
-  programId: PublicKey; owner: PublicKey; keeper: PublicKey; dest: PublicKey; amount: bigint; minOut: bigint;
+  programId: PublicKey; owner: PublicKey; keeper: PublicKey; userSource: PublicKey; keeperSource: PublicKey;
+  dest: PublicKey; amount: bigint; minOut: bigint;
 }) {
   const data = new Writer().bytes(DISC.begin_sweep).u64(p.amount).u64(p.minOut).done();
   return new TransactionInstruction({
@@ -237,8 +242,8 @@ export function beginSweepIx(p: {
       { pubkey: configPda(p.programId), isSigner: false, isWritable: false },
       { pubkey: vaultPda(p.programId, p.owner), isSigner: false, isWritable: true },
       { pubkey: p.keeper, isSigner: true, isWritable: false },
-      { pubkey: ata(p.owner, USDC_MINT), isSigner: false, isWritable: true },
-      { pubkey: ata(p.keeper, USDC_MINT), isSigner: false, isWritable: true },
+      { pubkey: p.userSource, isSigner: false, isWritable: true },
+      { pubkey: p.keeperSource, isSigner: false, isWritable: true },
       { pubkey: p.dest, isSigner: false, isWritable: false },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SYSVAR_INSTRUCTIONS_PUBKEY, isSigner: false, isWritable: false },
@@ -247,33 +252,82 @@ export function beginSweepIx(p: {
   });
 }
 
-export function endSweepIx(p: { programId: PublicKey; owner: PublicKey; keeper: PublicKey; dest: PublicKey }) {
+export function endSweepIx(p: {
+  programId: PublicKey; owner: PublicKey; keeper: PublicKey; keeperSource: PublicKey; dest: PublicKey; userSource: PublicKey;
+}) {
   return new TransactionInstruction({
     programId: p.programId,
     keys: [
       { pubkey: configPda(p.programId), isSigner: false, isWritable: false },
       { pubkey: vaultPda(p.programId, p.owner), isSigner: false, isWritable: true },
       { pubkey: p.keeper, isSigner: true, isWritable: false },
-      { pubkey: ata(p.keeper, USDC_MINT), isSigner: false, isWritable: false },
+      { pubkey: p.keeperSource, isSigner: false, isWritable: true },
       { pubkey: p.dest, isSigner: false, isWritable: false },
+      { pubkey: p.userSource, isSigner: false, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
     ],
     data: buf(new Uint8Array(DISC.end_sweep)),
   });
 }
+
+// ---------------------------------------------------------------- wrapped SOL (SOL-funded vaults)
+
+/** Address of the user's dedicated Cache SOL account (a wrapped-SOL token account, not their ATA,
+ *  so apps that close the standard wrapped-SOL account never touch it). */
+export const cacheSolAccount = (owner: PublicKey) => PublicKey.createWithSeed(owner, CACHE_SOL_SEED, TOKEN_PROGRAM_ID);
+
+/** Instructions that create the Cache SOL account holding `lamports` of wrapped SOL. */
+export async function createCacheSolAccountIxs(owner: PublicKey, lamports: bigint, rentLamports: number) {
+  const account = await cacheSolAccount(owner);
+  return [
+    SystemProgram.createAccountWithSeed({
+      fromPubkey: owner, newAccountPubkey: account, basePubkey: owner, seed: CACHE_SOL_SEED,
+      lamports: rentLamports + Number(lamports), space: 165, programId: TOKEN_PROGRAM_ID,
+    }),
+    new TransactionInstruction({
+      programId: TOKEN_PROGRAM_ID,
+      keys: [{ pubkey: account, isSigner: false, isWritable: true }, { pubkey: WSOL_MINT, isSigner: false, isWritable: false }],
+      data: buf([18, ...owner.toBytes()]),
+    }),
+  ];
+}
+
+/** Moves more SOL into the Cache SOL account and syncs its wrapped balance. */
+export async function addToCacheSolIxs(owner: PublicKey, lamports: bigint) {
+  const account = await cacheSolAccount(owner);
+  return [SystemProgram.transfer({ fromPubkey: owner, toPubkey: account, lamports: Number(lamports) }), syncNativeIx(account)];
+}
+
+export const syncNativeIx = (account: PublicKey) => new TransactionInstruction({
+  programId: TOKEN_PROGRAM_ID, keys: [{ pubkey: account, isSigner: false, isWritable: true }], data: buf([17]),
+});
+
+/** SPL Token CloseAccount (9): for wrapped SOL this returns all of it to `destination` as SOL. */
+export const closeTokenAccountIx = (account: PublicKey, destination: PublicKey, owner: PublicKey) => new TransactionInstruction({
+  programId: TOKEN_PROGRAM_ID,
+  keys: [
+    { pubkey: account, isSigner: false, isWritable: true },
+    { pubkey: destination, isSigner: false, isWritable: true },
+    { pubkey: owner, isSigner: true, isWritable: false },
+  ],
+  data: buf([9]),
+});
 
 // ---------------------------------------------------------------- accounts
 
 const hasDisc = (data: Uint8Array, disc: number[]) => disc.every((b, i) => data[i] === b);
 
 export type VaultState = {
-  owner: PublicKey; picks: PublicKey[]; weeklyCap: bigint; multiplier: number; paused: boolean;
-  periodStart: number; spentInPeriod: bigint; totalSwept: bigint; sweepCount: bigint; sweepActive: boolean;
+  owner: PublicKey; fundingMint: PublicKey; fundingAccount: PublicKey; picks: PublicKey[]; weeklyCap: bigint; multiplier: number;
+  paused: boolean; periodStart: number; spentInPeriod: bigint; totalSwept: bigint; sweepCount: bigint; sweepActive: boolean;
 };
 
 export function decodeVault(data: Uint8Array): VaultState {
   if (!hasDisc(data, ACCOUNT_DISC.Vault)) throw new Error("Not a Cache vault account");
   const r = new Reader(data).skip(8);
   const owner = r.pubkey();
+  const fundingMint = r.pubkey();
+  const fundingAccount = r.pubkey();
   const picks = r.pubkeys();
   const weeklyCap = r.u64();
   const multiplier = r.u16();
@@ -283,8 +337,14 @@ export function decodeVault(data: Uint8Array): VaultState {
   const totalSwept = r.u64();
   const sweepCount = r.u64();
   const sweepActive = r.bool();
-  return { owner, picks, weeklyCap, multiplier, paused, periodStart, spentInPeriod, totalSwept, sweepCount, sweepActive };
+  return { owner, fundingMint, fundingAccount, picks, weeklyCap, multiplier, paused, periodStart, spentInPeriod, totalSwept, sweepCount, sweepActive };
 }
+
+/** Decimals and label for a vault's funding token. */
+export const fundingInfo = (mint: PublicKey) =>
+  mint.equals(WSOL_MINT) ? { kind: "SOL" as const, decimals: SOL_DECIMALS } : { kind: "USDC" as const, decimals: USDC_DECIMALS };
+export const toUnits = (amount: number, decimals: number) => BigInt(Math.round(amount * 10 ** decimals));
+export const fromUnits = (units: bigint, decimals: number) => Number(units) / 10 ** decimals;
 
 export type ConfigState = {
   admin: PublicKey; keeper: PublicKey; swapProgram: PublicKey; usdcMint: PublicKey; paused: boolean; allowedMints: PublicKey[];

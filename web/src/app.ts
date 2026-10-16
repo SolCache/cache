@@ -1,22 +1,35 @@
 import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import {
-  approveIx, ata, closeVaultIx, createAtaIdempotentIx, initializeVaultIx, MAX_PICKS, MULTIPLIERS, revokeIx,
-  STOCKS, stockByMint, toUsdcUnits, TOKEN_PROGRAM_ID, updateVaultIx, USDC_MINT, vaultPda,
+  addToCacheSolIxs, approveIx, ata, cacheSolAccount, closeTokenAccountIx, closeVaultIx, createAtaIdempotentIx,
+  createCacheSolAccountIxs, initializeVaultIx, MAX_PICKS, MULTIPLIERS, revokeIx, SOL_DECIMALS, STOCKS, stockByMint,
+  toUnits, TOKEN_PROGRAM_ID, updateVaultIx, USDC_DECIMALS, USDC_MINT, vaultPda,
 } from "./shared/cache";
 
 // ---------------------------------------------------------------- types & state
 
+type Funding = "USDC" | "SOL";
 type Stock = { symbol: string; name: string; mint: string };
-type Config = { programId: string; keeper: string; config: null | { paused: boolean; keeper: string; allowedMints: string[] }; keeperMatches: boolean; stocks: Stock[]; minSweepUsd: number };
+type Config = {
+  programId: string; keeper: string; config: null | { paused: boolean; keeper: string; allowedMints: string[] };
+  keeperMatches: boolean; stocks: Stock[]; minSweepUsd: number; solPriceUsd: number | null;
+};
+type TokenState = { balance: number; approved: boolean; allowance: number };
 type State = {
-  registered: boolean; pendingUsd: number;
-  vault: null | { picks: string[]; weeklyCapUsd: number; multiplier: number; paused: boolean; spentThisWeekUsd: number; periodStart: number; totalSweptUsd: number; sweepCount: number };
-  usdc: null | { balanceUsd: number; approvedToCache: boolean; allowanceUsd: number; delegate: string | null };
+  registered: boolean; pendingUsd: number; solPriceUsd: number | null;
+  vault: null | {
+    funding: Funding; fundingAccount: string; picks: string[]; weeklyCap: number; multiplier: number; paused: boolean;
+    spentThisWeek: number; periodStart: number; totalSwept: number; sweepCount: number;
+  };
+  usdc: TokenState | null;
+  cacheSol: (TokenState & { account: string }) | null;
+  walletSol: number;
   trades: any[]; sweeps: any[];
 };
 
-const CAP_STEPS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
+const USDC_CAP_STEPS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000];
+const SOL_CAP_STEPS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 1000];
 const ALLOWANCE_WEEKS = [1, 4, 12];
+const SOL_RESERVE = 0.03; // kept in the wallet for fees and account deposits
 
 let cfg: Config;
 let provider: any = null;
@@ -24,15 +37,19 @@ let owner: PublicKey | null = null;
 let state: State | null = null;
 let editing = false;
 let busy = false;
-const form = { picks: [] as string[], cap: 25, mult: 1, weeks: 4 };
+const form = { funding: "USDC" as Funding, picks: [] as string[], capUsd: 25, capSol: 0.25, mult: 1, weeks: 4 };
 
 const $ = <T extends HTMLElement = HTMLElement>(s: string, r: ParentNode = document) => r.querySelector(s) as T;
 const main = $("#main");
 const money = (n: number, d = 2) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const sol = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: n < 1 ? 4 : 2 })} SOL`;
+const amountIn = (f: Funding, n: number) => (f === "SOL" ? sol(n) : money(n));
 const short = (k: string) => k.slice(0, 4) + "…" + k.slice(-4);
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const solscan = (sig: string) => `https://solscan.io/tx/${sig}`;
 const programId = () => new PublicKey(cfg.programId);
+const capFor = (f: Funding) => (f === "SOL" ? form.capSol : form.capUsd);
+const decimalsFor = (f: Funding) => (f === "SOL" ? SOL_DECIMALS : USDC_DECIMALS);
 
 // ---------------------------------------------------------------- network
 
@@ -119,28 +136,57 @@ async function tokenProgramsFor(mints: string[]) {
   });
 }
 
+/** SOL the user will move into the Cache SOL account at setup (also the approval). */
+const solSetAside = () => Math.round(form.capSol * form.weeks * 1e4) / 1e4;
+const solShortfall = () => Math.max(0, solSetAside() + SOL_RESERVE - (state?.walletSol ?? 0));
+
 async function saveSettings() {
   if (!owner) return;
   if (!form.picks.length) throw new Error("Pick at least one stock");
+  const picks = form.picks.map((m) => new PublicKey(m));
   const progs = await tokenProgramsFor(form.picks);
   const destAtas = form.picks.map((m, i) => ata(owner!, new PublicKey(m), progs[i]));
-  const existing = await accounts([ata(owner, USDC_MINT), ...destAtas]);
+  const existing = await accounts(destAtas);
   const ataIxs: TransactionInstruction[] = [];
-  if (!existing[0]) ataIxs.push(createAtaIdempotentIx(owner, owner, USDC_MINT, TOKEN_PROGRAM_ID));
-  form.picks.forEach((m, i) => { if (!existing[i + 1]) ataIxs.push(createAtaIdempotentIx(owner!, owner!, new PublicKey(m), progs[i])); });
+  form.picks.forEach((m, i) => { if (!existing[i]) ataIxs.push(createAtaIdempotentIx(owner!, owner!, new PublicKey(m), progs[i])); });
+  const vault = vaultPda(programId(), owner);
 
-  const picks = form.picks.map((m) => new PublicKey(m));
-  const vaultIx = state?.vault
-    ? updateVaultIx({ programId: programId(), owner, picks, weeklyCapUsd: form.cap, multiplier: form.mult, paused: state.vault.paused })
-    : initializeVaultIx({ programId: programId(), owner, picks, weeklyCapUsd: form.cap, multiplier: form.mult });
-  const approve = approveIx(ata(owner, USDC_MINT), vaultPda(programId(), owner), owner, toUsdcUnits(form.cap * form.weeks));
+  // Editing an existing vault: settings only (switching between USDC and SOL means Stop and set up again).
+  if (state?.vault) {
+    const f = state.vault.funding;
+    const ixs = [...ataIxs, updateVaultIx({ programId: programId(), owner, picks, weeklyCap: toUnits(capFor(f), decimalsFor(f)), multiplier: form.mult, paused: state.vault.paused })];
+    if (f === "USDC") ixs.push(approveIx(ata(owner, USDC_MINT), vault, owner, toUnits(form.capUsd * form.weeks, USDC_DECIMALS)));
+    await send(ixs, "Saving settings");
+    editing = false;
+    return refresh();
+  }
 
-  // Keep each transaction under Solana's size limit: many new stock accounts go in their own transaction first.
-  if (ataIxs.length > 3) {
-    await send(ataIxs, "Creating your stock accounts");
-    await send([vaultIx, approve], state?.vault ? "Saving settings" : "Starting Cache");
+  let fundingIxs: TransactionInstruction[];
+  let fundingAccount: PublicKey;
+  if (form.funding === "USDC") {
+    fundingAccount = ata(owner, USDC_MINT);
+    fundingIxs = [createAtaIdempotentIx(owner, owner, USDC_MINT, TOKEN_PROGRAM_ID)];
+    fundingIxs.push(approveIx(fundingAccount, vault, owner, toUnits(form.capUsd * form.weeks, USDC_DECIMALS)));
   } else {
-    await send([...ataIxs, vaultIx, approve], state?.vault ? "Saving settings" : "Starting Cache");
+    if (solShortfall() > 0) throw new Error(`You need about ${sol(solShortfall())} more SOL in this wallet, or a smaller limit.`);
+    fundingAccount = await cacheSolAccount(owner);
+    const lamports = toUnits(solSetAside(), SOL_DECIMALS);
+    const [existingSol] = await accounts([fundingAccount]);
+    const rent = await rpc("getMinimumBalanceForRentExemption", [165]);
+    fundingIxs = existingSol ? await addToCacheSolIxs(owner, lamports) : await createCacheSolAccountIxs(owner, lamports, rent);
+    fundingIxs.push(approveIx(fundingAccount, vault, owner, lamports));
+  }
+  const init = initializeVaultIx({ programId: programId(), owner, fundingAccount, picks, weeklyCap: toUnits(capFor(form.funding), decimalsFor(form.funding)), multiplier: form.mult });
+  // The approval must come after the funding account exists; the vault instruction checks the account too.
+  const approve = fundingIxs.pop()!;
+  const mainIxs = [...fundingIxs, init, approve];
+
+  // Keep each transaction under Solana's size limit: several new stock accounts go in their own transaction first.
+  if (ataIxs.length > 2) {
+    await send(ataIxs, "Creating your stock accounts");
+    await send(mainIxs, "Starting Cache");
+  } else {
+    await send([...ataIxs, ...mainIxs], "Starting Cache");
   }
   await api("/api/register", { wallet: owner.toBase58() });
   editing = false;
@@ -150,20 +196,37 @@ async function saveSettings() {
 async function setPaused(paused: boolean) {
   if (!owner || !state?.vault) return;
   const v = state.vault;
-  await send([updateVaultIx({ programId: programId(), owner, picks: v.picks.map((m) => new PublicKey(m)), weeklyCapUsd: v.weeklyCapUsd, multiplier: v.multiplier, paused })], paused ? "Pausing" : "Resuming");
+  await send([updateVaultIx({ programId: programId(), owner, picks: v.picks.map((m) => new PublicKey(m)), weeklyCap: toUnits(v.weeklyCap, decimalsFor(v.funding)), multiplier: v.multiplier, paused })], paused ? "Pausing" : "Resuming");
   await refresh();
 }
 
 async function topUp() {
   if (!owner || !state?.vault) return;
-  const amount = state.vault.weeklyCapUsd * form.weeks;
-  await send([approveIx(ata(owner, USDC_MINT), vaultPda(programId(), owner), owner, toUsdcUnits(amount))], "Updating approval");
+  const v = state.vault;
+  const vault = vaultPda(programId(), owner);
+  if (v.funding === "USDC") {
+    await send([approveIx(ata(owner, USDC_MINT), vault, owner, toUnits(v.weeklyCap * form.weeks, USDC_DECIMALS))], "Updating approval");
+  } else {
+    const add = Math.round(v.weeklyCap * form.weeks * 1e4) / 1e4;
+    if (add + SOL_RESERVE > state.walletSol) throw new Error(`Adding ${sol(add)} needs more SOL in your wallet.`);
+    const account = await cacheSolAccount(owner);
+    const total = (state.cacheSol?.balance ?? 0) + add;
+    await send([...(await addToCacheSolIxs(owner, toUnits(add, SOL_DECIMALS))), approveIx(account, vault, owner, toUnits(total, SOL_DECIMALS))], `Adding ${sol(add)}`);
+  }
   await refresh();
 }
 
 async function stopCache() {
-  if (!owner) return;
-  await send([revokeIx(ata(owner, USDC_MINT), owner), closeVaultIx({ programId: programId(), owner })], "Stopping Cache");
+  if (!owner || !state?.vault) return;
+  const ixs: TransactionInstruction[] = [];
+  if (state.vault.funding === "USDC") {
+    ixs.push(revokeIx(ata(owner, USDC_MINT), owner));
+  } else {
+    const account = await cacheSolAccount(owner);
+    ixs.push(revokeIx(account, owner), closeTokenAccountIx(account, owner, owner));
+  }
+  ixs.push(closeVaultIx({ programId: programId(), owner }));
+  await send(ixs, state.vault.funding === "SOL" ? "Stopping Cache and returning your SOL" : "Stopping Cache");
   await refresh();
 }
 
@@ -202,8 +265,9 @@ async function refresh() {
     state = await api<State>(`/api/state?wallet=${owner.toBase58()}`);
   }
   if (state.vault) {
+    form.funding = state.vault.funding;
     form.picks = [...state.vault.picks];
-    form.cap = state.vault.weeklyCapUsd;
+    if (state.vault.funding === "SOL") form.capSol = state.vault.weeklyCap; else form.capUsd = state.vault.weeklyCap;
     form.mult = state.vault.multiplier;
     await loadHoldings(state.vault.picks).catch(() => (holdings = []));
   }
@@ -241,7 +305,7 @@ function renderWallet() {
 
 function notReady() {
   return `<section class="card center"><span class="tile" style="width:84px"></span><h2>Cache isn't set up on mainnet yet</h2>
-    <p class="muted">The program is deployed but its configuration hasn't been initialized. Run the “Initialize config” workflow, then reload.</p>
+    <p class="muted">The program is deployed but its configuration hasn't been initialized.</p>
     <p class="dim mono">Program ${esc(cfg.programId)}</p></section>`;
 }
 
@@ -249,77 +313,97 @@ function connectView() {
   const list = WALLETS.map((w) => `<button class="wallet" data-act="connect" data-name="${w.name}">${w.name}<span>${w.get() ? "Detected" : "Install"}</span></button>`).join("");
   return `<section class="card center"><span class="tile" style="width:96px"></span>
     <h2>Connect your wallet</h2>
-    <p class="muted" style="max-width:34em">Cache follows this address for swaps and sends the xStocks it buys back here. Your funds never leave your wallet until a sweep.</p>
+    <p class="muted" style="max-width:34em">Cache follows this address for swaps and sends the xStocks it buys back here. Your funds stay in your wallet until a sweep.</p>
     <div class="wallets">${list}</div>
-    <p class="note warn" style="max-width:34em;text-align:left">This is a mainnet test of unaudited software. Use a wallet with only a small amount of USDC. xStocks aren't available to US persons.</p>
+    <p class="note warn" style="max-width:34em;text-align:left">This is a mainnet test of unaudited software. Use a wallet with only a small amount of funds. xStocks aren't available to US persons.</p>
   </section>`;
 }
 
 function setupView() {
   const isEdit = !!state?.vault;
+  const f = isEdit ? state!.vault!.funding : form.funding;
   const stocks = cfg.stocks.length ? cfg.stocks : STOCKS;
-  const capIdx = Math.max(0, CAP_STEPS.indexOf(form.cap) === -1 ? CAP_STEPS.findIndex((c) => c >= form.cap) : CAP_STEPS.indexOf(form.cap));
-  const allowance = form.cap * form.weeks;
+  const steps = f === "SOL" ? SOL_CAP_STEPS : USDC_CAP_STEPS;
+  const cap = capFor(f);
+  const capIdx = Math.max(0, steps.indexOf(cap) === -1 ? steps.findIndex((c) => c >= cap) : steps.indexOf(cap));
+  const usdHint = f === "SOL" && cfg.solPriceUsd ? ` <span class="dim" style="font-size:13px">≈ ${money(cap * cfg.solPriceUsd, 0)}</span>` : "";
+  const total = cap * form.weeks;
+  const shortfall = f === "SOL" && !isEdit ? solShortfall() : 0;
   return `<section class="card stack">
     <div><span class="pixel" style="color:var(--teal)">${isEdit ? "Edit settings" : "Set up Cache"}</span>
-    <h2 style="margin-top:6px">${isEdit ? "Change how Cache works for you" : "Three choices, one signature"}</h2></div>
+    <h2 style="margin-top:6px">${isEdit ? "Change how Cache works for you" : "A few choices, one signature"}</h2></div>
+
+    <div class="field"><span class="flabel" id="fundLbl">Invest round-ups from</span>
+      ${isEdit
+        ? `<p class="dim" style="font-size:13.5px">Paying with <b style="color:var(--fg)">${f}</b>. To switch, stop Cache and set it up again.</p>`
+        : `<div class="seg" role="group" aria-labelledby="fundLbl" style="max-width:320px">${(["USDC", "SOL"] as Funding[]).map((x) => `<button data-act="funding" data-f="${x}" aria-pressed="${f === x}">${x}</button>`).join("")}</div>
+           <p class="dim" style="font-size:13px">${f === "USDC"
+             ? "Cache spends USDC from your wallet, up to the approval below."
+             : "Cache moves the SOL below into a dedicated Cache SOL account in your wallet (shown as Wrapped SOL) and spends from that. Stopping returns it as normal SOL."}</p>`}</div>
 
     <div class="field"><div class="field-top"><span class="flabel">Pick your stocks</span><span class="dim">${form.picks.length}/${MAX_PICKS}</span></div>
       <div class="picker">${stocks.map((s) => `<button class="stock" data-act="pick" data-mint="${s.mint}" aria-pressed="${form.picks.includes(s.mint)}"><span class="tk">${esc(s.symbol)}</span><span class="nm">${esc(s.name)}</span></button>`).join("")}</div></div>
 
     <div class="grid2">
-      <div class="field"><div class="field-top"><label for="cap">Weekly limit</label><span class="big grad-text mono" id="capOut">${money(form.cap, 0)}</span></div>
-        <input type="range" id="cap" min="0" max="${CAP_STEPS.length - 1}" step="1" value="${capIdx}">
-        <div class="field-top dim" style="font-size:12px"><span>$5</span><span>$100,000</span></div></div>
+      <div class="field"><div class="field-top"><label for="cap">Weekly limit</label><span><span class="big grad-text mono" id="capOut">${amountIn(f, cap).replace(".00", "")}</span>${usdHint}</span></div>
+        <input type="range" id="cap" data-funding="${f}" min="0" max="${steps.length - 1}" step="1" value="${capIdx}">
+        <div class="field-top dim" style="font-size:12px"><span>${f === "SOL" ? "0.05 SOL" : "$5"}</span><span>${f === "SOL" ? "1,000 SOL" : "$100,000"}</span></div></div>
       <div class="field"><span class="flabel" id="multLbl">Round-up multiplier</span>
         <div class="seg" role="group" aria-labelledby="multLbl">${MULTIPLIERS.map((m) => `<button data-act="mult" data-m="${m}" aria-pressed="${form.mult === m}">${m}x</button>`).join("")}</div></div>
     </div>
 
-    <div class="field"><span class="flabel" id="wkLbl">USDC approval</span>
+    ${isEdit && f === "SOL" ? "" : `<div class="field"><span class="flabel" id="wkLbl">${f === "SOL" ? "SOL to set aside" : "USDC approval"}</span>
       <div class="seg" role="group" aria-labelledby="wkLbl" style="max-width:420px">${ALLOWANCE_WEEKS.map((w) => `<button data-act="weeks" data-w="${w}" aria-pressed="${form.weeks === w}">${w} wk${w > 1 ? "s" : ""}</button>`).join("")}</div>
-      <p class="dim" style="font-size:13px">Cache can spend up to <b class="mono" style="color:var(--fg)">${money(allowance, 0)}</b> of your USDC in total before you top up, and never more than your weekly limit in any week.</p></div>
+      <p class="dim" style="font-size:13px">${f === "SOL"
+        ? `Moves <b class="mono" style="color:var(--fg)">${sol(total)}</b> into your Cache SOL account. Cache never spends more than your weekly limit in a week.`
+        : `Cache can spend up to <b class="mono" style="color:var(--fg)">${money(total, 0)}</b> of your USDC in total before you top up, and never more than your weekly limit in a week.`}</p></div>`}
 
     <div class="summary">
+      <div><span>Pay with</span><b>${f}</b></div>
       <div><span>Stocks</span><b>${form.picks.map((m) => esc(stockByMint(m)?.symbol ?? short(m))).join(", ") || "None yet"}</b></div>
       <div><span>Round-ups</span><b>To the next dollar × ${form.mult}</b></div>
-      <div><span>Weekly limit</span><b>${money(form.cap, 0)} USDC</b></div>
-      <div><span>Approval</span><b>${money(allowance, 0)} USDC to Cache's vault</b></div>
+      <div><span>Weekly limit</span><b>${amountIn(f, cap)}</b></div>
+      ${isEdit && f === "SOL" ? "" : `<div><span>${f === "SOL" ? "Set aside" : "Approval"}</span><b>${amountIn(f, total)}</b></div>`}
       <div><span>Sweeps</span><b>Daily at 12:00 UTC, or any time with “Sweep now”</b></div>
     </div>
-    ${allowance > 1000 ? `<p class="note warn">That's a large approval for a test. You can pick a smaller limit or fewer weeks and top up later.</p>` : ""}
-    <p class="dim" style="font-size:13px">First-time setup also opens a token account for each stock (about 0.002 SOL each, refundable if you close them).</p>
+    ${shortfall > 0 ? `<p class="note warn">Your wallet has ${sol(state?.walletSol ?? 0)}. Setting aside ${sol(total)} needs about ${sol(shortfall)} more, or pick a smaller limit or fewer weeks.</p>` : ""}
+    ${!isEdit ? `<p class="dim" style="font-size:13px">First-time setup also opens a token account for each stock (about 0.002 SOL each, refundable if you close them).</p>` : ""}
     <div class="row">
       ${isEdit ? `<button class="btn btn-ghost" data-act="cancel-edit">Cancel</button>` : ""}
-      <button class="btn btn-primary" data-act="save" ${form.picks.length && !busy ? "" : "disabled"}>${isEdit ? "Save changes" : "Sign and start"}</button>
+      <button class="btn btn-primary" data-act="save" ${form.picks.length && !busy && shortfall === 0 ? "" : "disabled"}>${isEdit ? "Save changes" : "Sign and start"}</button>
     </div>
   </section>`;
 }
 
 function dashboardView() {
-  const s = state!, v = s.vault!, u = s.usdc;
-  const spentPct = Math.min(100, (v.spentThisWeekUsd / v.weeklyCapUsd) * 100);
-  const warn = !u ? "You don't have a USDC account yet. Add some USDC to this wallet." :
-    !u.approvedToCache ? "Cache's USDC approval is missing (another app may have replaced it). Top up the approval to keep sweeps working." :
-    u.allowanceUsd < Math.min(s.pendingUsd, v.weeklyCapUsd) ? "Your USDC approval is running low. Top it up below." :
-    u.balanceUsd < cfg.minSweepUsd ? `Your USDC balance is below the ${money(cfg.minSweepUsd)} minimum sweep. Add USDC to keep investing.` : "";
+  const s = state!, v = s.vault!, f = v.funding;
+  const src = f === "SOL" ? s.cacheSol : s.usdc;
+  const spentPct = Math.min(100, (v.spentThisWeek / v.weeklyCap) * 100);
+  const price = f === "SOL" ? s.solPriceUsd ?? cfg.solPriceUsd ?? 0 : 1;
+  const allowanceUsd = (src?.allowance ?? 0) * price;
+  const warn = !src ? (f === "SOL" ? "Your Cache SOL account is missing. Stop Cache and set it up again." : "You don't have a USDC account yet. Add some USDC to this wallet.") :
+    !src.approved ? `Cache's ${f} approval is missing (another app may have replaced it). Use “${f === "SOL" ? "Add SOL" : "Top up approval"}” to keep sweeps working.` :
+    allowanceUsd < Math.min(s.pendingUsd, v.weeklyCap * price) ? `Your ${f === "SOL" ? "Cache SOL balance" : "USDC approval"} is running low. Top it up below.` :
+    src.balance * price < cfg.minSweepUsd ? `Your ${f === "SOL" ? "Cache SOL" : "USDC"} balance is below the ${money(cfg.minSweepUsd)} minimum sweep.` : "";
+  const sweptLabel = f === "SOL" ? `${sol(v.totalSwept)}${price ? ` <span class="dim" style="font-size:14px">≈ ${money(v.totalSwept * price)}</span>` : ""}` : money(v.totalSwept);
   return `
   ${v.paused ? `<p class="note warn">Round-ups are paused. New trades aren't counted until you resume.</p>` : ""}
   ${warn ? `<p class="note warn">${warn}</p>` : ""}
   <section class="stats">
     <div class="stat"><span class="label">Pending round-ups</span><span class="value grad-text">${money(s.pendingUsd)}</span><span class="sub">Invested at the next sweep</span></div>
-    <div class="stat"><span class="label">Invested so far</span><span class="value">${money(v.totalSweptUsd)}</span><span class="sub">${v.sweepCount} sweep${v.sweepCount === 1 ? "" : "s"}</span></div>
-    <div class="stat"><span class="label">This week</span><span class="value">${money(v.spentThisWeekUsd)}</span><div class="bar-track"><i style="width:${spentPct}%"></i></div><span class="sub">of ${money(v.weeklyCapUsd, 0)} limit</span></div>
-    <div class="stat"><span class="label">USDC</span><span class="value">${money(u?.balanceUsd ?? 0)}</span><span class="sub">Approval left ${money(u?.allowanceUsd ?? 0)}</span></div>
+    <div class="stat"><span class="label">Invested so far</span><span class="value">${sweptLabel}</span><span class="sub">${v.sweepCount} sweep${v.sweepCount === 1 ? "" : "s"}</span></div>
+    <div class="stat"><span class="label">This week</span><span class="value">${amountIn(f, v.spentThisWeek)}</span><div class="bar-track"><i style="width:${spentPct}%"></i></div><span class="sub">of ${amountIn(f, v.weeklyCap)} limit</span></div>
+    <div class="stat"><span class="label">${f === "SOL" ? "Cache SOL" : "USDC"}</span><span class="value">${amountIn(f, src?.balance ?? 0)}</span><span class="sub">Approval left ${amountIn(f, src?.allowance ?? 0)}${f === "SOL" ? ` · Wallet ${sol(s.walletSol)}` : ""}</span></div>
   </section>
 
   <section class="card stack">
-    <div class="row" style="justify-content:space-between"><h3>Your stocks</h3><span class="dim" style="font-size:13px">Round-ups × ${v.multiplier}</span></div>
+    <div class="row" style="justify-content:space-between"><h3>Your stocks</h3><span class="dim" style="font-size:13px">Paid with ${f} · round-ups × ${v.multiplier}</span></div>
     <div class="holdings">${holdings.map((h) => `<div class="holding"><span class="tk">${esc(h.symbol)}</span><span class="amt">${h.amount.toLocaleString("en-US", { maximumFractionDigits: 6 })}</span><span class="dim" style="font-size:12px">tokens in your wallet</span></div>`).join("")}</div>
     <div class="row">
       <button class="btn btn-primary" data-act="sweep" ${busy || v.paused ? "disabled" : ""}>Sweep now</button>
       <button class="btn btn-ghost" data-act="${v.paused ? "resume" : "pause"}" ${busy ? "disabled" : ""}>${v.paused ? "Resume" : "Pause"}</button>
       <button class="btn btn-ghost" data-act="edit" ${busy ? "disabled" : ""}>Edit settings</button>
-      <button class="btn btn-ghost" data-act="topup" ${busy ? "disabled" : ""}>Top up approval (${form.weeks} wk)</button>
+      <button class="btn btn-ghost" data-act="topup" ${busy ? "disabled" : ""}>${f === "SOL" ? `Add ${sol(Math.round(v.weeklyCap * form.weeks * 1e4) / 1e4)}` : `Top up approval (${form.weeks} wk)`}</button>
       <button class="btn btn-danger" data-act="stop" ${busy ? "disabled" : ""}>Stop Cache</button>
     </div>
   </section>
@@ -333,19 +417,18 @@ function dashboardView() {
 
   <section class="card stack">
     <h3>Sweeps</h3>
-    <div class="table-wrap">${s.sweeps.length ? `<table><thead><tr><th>When</th><th>Stock</th><th style="text-align:right">USDC</th><th>Status</th><th>Details</th></tr></thead><tbody>
+    <div class="table-wrap">${s.sweeps.length ? `<table><thead><tr><th>When</th><th>Stock</th><th style="text-align:right">Value</th><th>Status</th><th>Details</th></tr></thead><tbody>
       ${s.sweeps.map((w) => `<tr><td>${when(w.ts)}</td><td class="mono">${esc(stockByMint(w.mint)?.symbol ?? short(w.mint))}</td><td class="num">${money(w.amount_usd)}</td><td><span class="status ${esc(w.status)}">${esc(STATUS_LABEL[w.status] ?? w.status)}</span></td><td class="desc">${w.sig ? `<a href="${solscan(w.sig)}" target="_blank" rel="noopener">Solscan</a> ` : ""}${esc(w.error || "")}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">No sweeps yet. Once round-ups reach ${money(cfg.minSweepUsd)}, use “Sweep now” or wait for the daily sweep.</div>`}</div>
   </section>`;
 }
 
 const STATUS_LABEL: Record<string, string> = { building: "Preparing", sent: "Pending", confirmed: "Confirmed", failed: "Failed", expired: "Dropped" };
-
 const when = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
 function paintRanges() {
   const cap = $<HTMLInputElement>("#cap");
-  if (cap) cap.style.setProperty("--p", (Number(cap.value) / (CAP_STEPS.length - 1)) * 100 + "%");
+  if (cap) cap.style.setProperty("--p", (Number(cap.value) / (Number(cap.max) || 1)) * 100 + "%");
 }
 
 let toastTimer: number | undefined;
@@ -374,6 +457,7 @@ document.addEventListener("click", (e) => {
   const act = b.dataset.act;
   if (act === "connect") return void run(() => connect(b.dataset.name!));
   if (act === "disconnect") return void disconnect();
+  if (act === "funding") { form.funding = b.dataset.f as Funding; return render(); }
   if (act === "pick") {
     const m = b.dataset.mint!;
     const i = form.picks.indexOf(m);
@@ -396,13 +480,18 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// While dragging, update only the label; re-render the summary when the slider is released.
 document.addEventListener("input", (e) => {
   const el = e.target as HTMLInputElement;
-  if (el.id === "cap") {
-    form.cap = CAP_STEPS[Number(el.value)];
-    $("#capOut").textContent = money(form.cap, 0);
-    paintRanges();
-  }
+  if (el.id !== "cap") return;
+  const f = el.dataset.funding as Funding;
+  if (f === "SOL") form.capSol = SOL_CAP_STEPS[Number(el.value)];
+  else form.capUsd = USDC_CAP_STEPS[Number(el.value)];
+  $("#capOut").textContent = amountIn(f, capFor(f)).replace(".00", "");
+  paintRanges();
+});
+document.addEventListener("change", (e) => {
+  if ((e.target as HTMLElement).id === "cap") render();
 });
 
 // ---------------------------------------------------------------- boot

@@ -8,6 +8,7 @@ import { Buffer } from "buffer";
 import {
   ata, beginSweepIx, configPda, createAtaIdempotentIx, decodeConfig, decodeTokenAccount, decodeVault, endSweepIx,
   fromUsdcUnits, roundUpUsd, stockByMint, toUsdcUnits, STOCKS, USDC_MINT, USDT_MINT, vaultPda, WSOL_MINT,
+  cacheSolAccount, fundingInfo, fromUnits, toUnits,
 } from "../src/shared/cache";
 
 export interface Env {
@@ -82,6 +83,7 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
       keeperMatches: config ? config.keeper === keeper : false,
       stocks: STOCKS.filter((s) => allowed.has(s.mint)),
       minSweepUsd: minSweep(env),
+      solPriceUsd: (await prices(env, [SOL]).catch(() => ({} as Record<string, number>)))[SOL] ?? null,
     });
   }
 
@@ -143,33 +145,42 @@ async function route(req: Request, url: URL, env: Env, ctx: ExecutionContext): P
 async function walletState(env: Env, wallet: string, reconcile = true) {
   const programId = new PublicKey(env.PROGRAM_ID);
   const owner = new PublicKey(wallet);
-  const [vaultAcc, usdcAcc] = await getAccounts(env, [vaultPda(programId, owner), ata(owner, USDC_MINT)]);
+  const vaultKey = vaultPda(programId, owner);
+  const solAccKey = await cacheSolAccount(owner);
+  const [vaultAcc, usdcAcc, solAcc, ownerAcc] = await getAccounts(env, [vaultKey, ata(owner, USDC_MINT), solAccKey, owner]);
   const vault = vaultAcc ? decodeVault(vaultAcc.data) : null;
-  const usdc = usdcAcc ? decodeTokenAccount(usdcAcc.data) : null;
   const user = await env.DB.prepare("SELECT * FROM users WHERE wallet = ?").bind(wallet).first<any>();
   const trades = await env.DB.prepare("SELECT * FROM trades WHERE wallet = ? ORDER BY ts DESC LIMIT 50").bind(wallet).all();
   const sweeps = await env.DB.prepare("SELECT * FROM sweeps WHERE wallet = ? ORDER BY ts DESC LIMIT 25").bind(wallet).all();
   const pending = user ? await pendingUsd(env, wallet, reconcile) : 0;
-  const vaultKey = vaultPda(programId, owner);
+
+  const tokenState = (acc: Acc | null, decimals: number) => {
+    if (!acc) return null;
+    const t = decodeTokenAccount(acc.data);
+    const approved = !!t.delegate && t.delegate.equals(vaultKey);
+    return { balance: fromUnits(t.amount, decimals), approved, allowance: approved ? fromUnits(t.delegatedAmount, decimals) : 0 };
+  };
+  const fi = vault ? fundingInfo(vault.fundingMint) : null;
+  const solPrice = fi?.kind === "SOL" ? (await prices(env, [SOL]).catch(() => ({} as Record<string, number>)))[SOL] ?? null : null;
   return {
     registered: !!user,
     pendingUsd: pending,
-    vault: vault && {
+    solPriceUsd: solPrice,
+    vault: vault && fi && {
+      funding: fi.kind,
+      fundingAccount: vault.fundingAccount.toBase58(),
       picks: vault.picks.map((m) => m.toBase58()),
-      weeklyCapUsd: fromUsdcUnits(vault.weeklyCap),
+      weeklyCap: fromUnits(vault.weeklyCap, fi.decimals),
       multiplier: vault.multiplier,
       paused: vault.paused,
-      spentThisWeekUsd: now() >= vault.periodStart + 7 * 86400 ? 0 : fromUsdcUnits(vault.spentInPeriod),
+      spentThisWeek: now() >= vault.periodStart + 7 * 86400 ? 0 : fromUnits(vault.spentInPeriod, fi.decimals),
       periodStart: vault.periodStart,
-      totalSweptUsd: fromUsdcUnits(vault.totalSwept),
+      totalSwept: fromUnits(vault.totalSwept, fi.decimals),
       sweepCount: Number(vault.sweepCount),
     },
-    usdc: usdc && {
-      balanceUsd: fromUsdcUnits(usdc.amount),
-      approvedToCache: !!usdc.delegate && usdc.delegate.equals(vaultKey),
-      allowanceUsd: usdc.delegate && usdc.delegate.equals(vaultKey) ? fromUsdcUnits(usdc.delegatedAmount) : 0,
-      delegate: usdc.delegate?.toBase58() ?? null,
-    },
+    usdc: tokenState(usdcAcc, 6),
+    cacheSol: solAcc ? { ...tokenState(solAcc, 9)!, account: solAccKey.toBase58() } : null,
+    walletSol: (ownerAcc?.lamports ?? 0) / 1e9,
     trades: trades.results,
     sweeps: sweeps.results,
   };
@@ -348,41 +359,50 @@ async function sweepWallet(env: Env, wallet: string) {
   const programId = new PublicKey(env.PROGRAM_ID);
   const owner = new PublicKey(wallet);
   const keeper = keeperKeypair(env);
-  const [vaultAcc, usdcAcc] = await getAccounts(env, [vaultPda(programId, owner), ata(owner, USDC_MINT)]);
+  const vaultKey = vaultPda(programId, owner);
+  const [vaultAcc] = await getAccounts(env, [vaultKey]);
   if (!vaultAcc) return skip(env, wallet, "No vault");
   const vault = decodeVault(vaultAcc.data);
   if (vault.paused) return skip(env, wallet, "Round-ups are paused");
-  if (!usdcAcc) return skip(env, wallet, "No USDC account");
-  const usdc = decodeTokenAccount(usdcAcc.data);
-  const vaultKey = vaultPda(programId, owner);
-  if (!usdc.delegate || !usdc.delegate.equals(vaultKey)) return skip(env, wallet, "USDC approval for Cache is missing; re-approve in the app");
+  const fi = fundingInfo(vault.fundingMint);
+  const [sourceAcc] = await getAccounts(env, [vault.fundingAccount]);
+  if (!sourceAcc) return skip(env, wallet, `Your ${fi.kind} funding account is missing; set it up again in the app`);
+  const source = decodeTokenAccount(sourceAcc.data);
+  if (!source.delegate || !source.delegate.equals(vaultKey)) return skip(env, wallet, `${fi.kind} approval for Cache is missing; re-approve in the app`);
 
+  // Amounts below are in the funding token's base units; round-ups are dollars, converted at today's price.
+  const price = fi.kind === "SOL" ? (await prices(env, [SOL]))[SOL] : 1;
+  if (!price) return skip(env, wallet, "Couldn't get the SOL price; will retry");
   const pending = await pendingUsd(env, wallet);
-  const capLeft = now() >= vault.periodStart + 7 * 86400 ? fromUsdcUnits(vault.weeklyCap) : fromUsdcUnits(vault.weeklyCap - vault.spentInPeriod);
-  const amountUsd = Math.floor(Math.min(pending, capLeft, fromUsdcUnits(usdc.delegatedAmount), fromUsdcUnits(usdc.amount)) * 100) / 100;
+  const pendingUnits = toUnits(pending / price, fi.decimals);
+  const capLeft = now() >= vault.periodStart + 7 * 86400 ? vault.weeklyCap : vault.weeklyCap - vault.spentInPeriod;
+  const min = (...xs: bigint[]) => xs.reduce((a, b) => (b < a ? b : a));
+  const amount = min(pendingUnits, capLeft, source.delegatedAmount, source.amount);
+  const amountUsd = Math.floor(fromUnits(amount, fi.decimals) * price * 100) / 100;
   if (amountUsd < minSweep(env)) {
-    return skip(env, wallet, `Nothing to sweep yet ($${amountUsd.toFixed(2)} available; pending $${pending.toFixed(2)}, cap left $${capLeft.toFixed(2)}, USDC $${fromUsdcUnits(usdc.amount).toFixed(2)}, allowance $${fromUsdcUnits(usdc.delegatedAmount).toFixed(2)})`);
+    const f = (u: bigint) => `${fromUnits(u, fi.decimals).toFixed(fi.kind === "SOL" ? 4 : 2)} ${fi.kind}`;
+    return skip(env, wallet, `Nothing to sweep yet ($${amountUsd.toFixed(2)} available; pending $${pending.toFixed(2)}, limit left ${f(capLeft)}, balance ${f(source.amount)}, approval ${f(source.delegatedAmount)})`);
   }
 
-  // Split across picks; tiny amounts go to one pick, rotating each sweep.
+  // Split across picks; small amounts go to one pick, rotating each sweep.
   const picks = vault.picks;
-  const perPick = amountUsd / picks.length;
-  const legs = perPick >= 0.5
-    ? picks.map((m, i) => ({ mint: m, usd: i === picks.length - 1 ? Math.round((amountUsd - Math.floor(perPick * 100) / 100 * (picks.length - 1)) * 100) / 100 : Math.floor(perPick * 100) / 100 }))
-    : [{ mint: picks[Number(vault.sweepCount % BigInt(picks.length))], usd: amountUsd }];
+  const n = amountUsd / picks.length >= 0.5 ? picks.length : 1;
+  const legs = Array.from({ length: n }, (_, i) => {
+    const mint = n === 1 ? picks[Number(vault.sweepCount % BigInt(picks.length))] : picks[i];
+    const units = i === n - 1 ? amount - (amount / BigInt(n)) * BigInt(n - 1) : amount / BigInt(n);
+    return { mint, units, usd: Math.round(fromUnits(units, fi.decimals) * price * 100) / 100 };
+  });
 
   const results: any[] = [];
-  const ctx: SweepCtx = { blockhash: await rpc(env, "getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value), alts: new Map() };
-  for (const leg of legs) {
-    let r = await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd, ctx, false);
-    // If the best route leaves USDC dust behind (program error KeeperKeptFunds), retry once with a single-pool route.
-    if (r.status === "failed" && /0x1781/.test(r.error ?? "")) r = await sweepLeg(env, keeper, programId, owner, leg.mint, leg.usd, ctx, true);
-    results.push(r);
-  }
+  const ctx: SweepCtx = {
+    blockhash: await rpc(env, "getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value),
+    alts: new Map(), fundingMint: vault.fundingMint, userSource: vault.fundingAccount,
+  };
+  for (const leg of legs) results.push(await sweepLeg(env, keeper, programId, owner, leg.mint, leg.units, leg.usd, ctx, false));
   return { swept: results };
 }
 
-type SweepCtx = { blockhash: { blockhash: string; lastValidBlockHeight: number }; alts: Map<string, AddressLookupTableAccount> };
+type SweepCtx = { blockhash: { blockhash: string; lastValidBlockHeight: number }; alts: Map<string, AddressLookupTableAccount>; fundingMint: PublicKey; userSource: PublicKey };
 
 // xStocks are Token-2022 mints (verified onchain at setup), so no lookup is needed per sweep.
 const TOKEN_2022 = new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -391,7 +411,7 @@ const TOKEN_CLASSIC = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
 const PROGRAM_ERRORS: Record<number, string> = {
   6015: "This sweep would exceed the weekly limit",
   6016: "The swap returned less than the minimum; nothing moved",
-  6017: "The swap route left some USDC behind, so the program refused it; nothing moved",
+  6017: "The keeper would have kept part of the funds, so the program refused it; nothing moved",
   6005: "Cache is paused", 6006: "Round-ups are paused",
 };
 function explain(message: string) {
@@ -400,9 +420,9 @@ function explain(message: string) {
   return code && PROGRAM_ERRORS[code] ? `${PROGRAM_ERRORS[code]} (code 0x${m![1]})` : message;
 }
 
-async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: PublicKey, mint: PublicKey, usd: number, ctx: SweepCtx, directOnly: boolean) {
+async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: PublicKey, mint: PublicKey, amount: bigint, usd: number, ctx: SweepCtx, directOnly: boolean) {
   const wallet = owner.toBase58();
-  const amount = toUsdcUnits(usd);
+  const keeperSource = ata(keeper.publicKey, ctx.fundingMint);
   const id = (await env.DB.prepare("INSERT INTO sweeps (wallet, ts, mint, amount_usd, status) VALUES (?,?,?,?, 'building') RETURNING id")
     .bind(wallet, now(), mint.toBase58(), usd).first<{ id: number }>())!.id;
   try {
@@ -410,7 +430,7 @@ async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: 
     const dest = ata(owner, mint, tokenProgram);
 
     const slippage = env.SLIPPAGE_BPS ?? "100";
-    const quote = await jup(env, `/swap/v1/quote?inputMint=${USDC_MINT.toBase58()}&outputMint=${mint.toBase58()}&amount=${amount}&slippageBps=${slippage}&restrictIntermediateTokens=true&maxAccounts=48${directOnly ? "&onlyDirectRoutes=true" : ""}`);
+    const quote = await jup(env, `/swap/v1/quote?inputMint=${ctx.fundingMint.toBase58()}&outputMint=${mint.toBase58()}&amount=${amount}&slippageBps=${slippage}&restrictIntermediateTokens=true&maxAccounts=48${directOnly ? "&onlyDirectRoutes=true" : ""}`);
     if (!quote?.outAmount) throw new Error(`No route for ${stockByMint(mint.toBase58())?.symbol ?? mint.toBase58()}`);
     const ins = await jup(env, "/swap/v1/swap-instructions", {
       quoteResponse: quote,
@@ -425,12 +445,12 @@ async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: 
     const minOut = BigInt(quote.otherAmountThreshold);
     const ixs: TransactionInstruction[] = [
       ...(ins.computeBudgetInstructions ?? []).map(toIx),
-      createAtaIdempotentIx(keeper.publicKey, keeper.publicKey, USDC_MINT, TOKEN_CLASSIC),
+      createAtaIdempotentIx(keeper.publicKey, keeper.publicKey, ctx.fundingMint, TOKEN_CLASSIC),
       createAtaIdempotentIx(keeper.publicKey, owner, mint, tokenProgram),
       ...(ins.setupInstructions ?? []).map(toIx),
-      beginSweepIx({ programId, owner, keeper: keeper.publicKey, dest, amount, minOut }),
+      beginSweepIx({ programId, owner, keeper: keeper.publicKey, userSource: ctx.userSource, keeperSource, dest, amount, minOut }),
       toIx(ins.swapInstruction),
-      endSweepIx({ programId, owner, keeper: keeper.publicKey, dest }),
+      endSweepIx({ programId, owner, keeper: keeper.publicKey, keeperSource, dest, userSource: ctx.userSource }),
       ...(ins.cleanupInstruction ? [toIx(ins.cleanupInstruction)] : []),
     ];
     const missingAlts = (ins.addressLookupTableAddresses ?? []).filter((a: string) => !ctx.alts.has(a));
@@ -489,7 +509,7 @@ async function rpc(env: Env, method: string, params: any[]) {
   return j.result;
 }
 
-type Acc = { data: Uint8Array; owner: string };
+type Acc = { data: Uint8Array; owner: string; lamports: number };
 const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 async function getAccount(env: Env, key: PublicKey): Promise<Acc | null> {
@@ -498,7 +518,7 @@ async function getAccount(env: Env, key: PublicKey): Promise<Acc | null> {
 
 async function getAccounts(env: Env, keys: PublicKey[]): Promise<(Acc | null)[]> {
   const r = await rpc(env, "getMultipleAccounts", [keys.map((k) => k.toBase58()), { encoding: "base64", commitment: "confirmed" }]);
-  return r.value.map((v: any) => (v ? { data: b64(v.data[0]), owner: v.owner } : null));
+  return r.value.map((v: any) => (v ? { data: b64(v.data[0]), owner: v.owner, lamports: v.lamports } : null));
 }
 
 async function loadAlts(env: Env, addresses: string[]) {
