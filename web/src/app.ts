@@ -1,6 +1,6 @@
 import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import {
-  addToCacheSolIxs, approveIx, ata, cacheSolAccount, closeTokenAccountIx, closeVaultIx, createAtaIdempotentIx,
+  addToCacheSolIxs, withdrawFromCacheSolIxs, approveIx, ata, cacheSolAccount, closeTokenAccountIx, closeVaultIx, createAtaIdempotentIx,
   createCacheSolAccountIxs, initializeVaultIx, MAX_PICKS, MULTIPLIERS, revokeIx, SOL_DECIMALS, STOCKS, stockByMint,
   toUnits, TOKEN_PROGRAM_ID, updateVaultIx, USDC_DECIMALS, USDC_MINT, vaultPda,
 } from "./shared/cache";
@@ -216,6 +216,21 @@ async function topUp() {
   await refresh();
 }
 
+async function withdrawSol() {
+  if (!owner || !state?.vault || !state.cacheSol || !withdrawPct) return;
+  const balance = toUnits(state.cacheSol.balance, SOL_DECIMALS);
+  const amount = withdrawPct === 100 ? balance : (balance * BigInt(withdrawPct)) / 100n;
+  if (amount <= 0n) throw new Error("Your Cache SOL account is empty.");
+  const rent = await rpc("getMinimumBalanceForRentExemption", [165]);
+  const account = await cacheSolAccount(owner);
+  const ixs = await withdrawFromCacheSolIxs(owner, amount, rent);
+  // Keep the approval in line with what's left.
+  ixs.push(approveIx(account, vaultPda(programId(), owner), owner, balance - amount));
+  await send(ixs, `Unwrapping ${sol(Number(amount) / 1e9)} to your wallet`);
+  withdrawPct = null;
+  await refresh();
+}
+
 async function stopCache() {
   if (!owner || !state?.vault) return;
   const ixs: TransactionInstruction[] = [];
@@ -319,6 +334,7 @@ async function sweepNow() {
 
 let holdings: { symbol: string; amount: number }[] = [];
 type SellLeg = { mint: string; symbol: string; amount: string; usdcOut?: number; tx?: string; error?: string; status?: "converted" | "failed" | "pending" };
+let withdrawPct: number | null = null;
 let convert: null | { legs: SellLeg[]; totalUsdc: number; done?: boolean } = null;
 
 async function refresh() {
@@ -468,9 +484,14 @@ function dashboardView() {
       <button class="btn btn-ghost" data-act="${v.paused ? "resume" : "pause"}" ${busy ? "disabled" : ""}>${v.paused ? "Resume" : "Pause"}</button>
       <button class="btn btn-ghost" data-act="edit" ${busy ? "disabled" : ""}>Edit settings</button>
       <button class="btn btn-ghost" data-act="topup" ${busy ? "disabled" : ""}>${f === "SOL" ? `Add ${sol(Math.round(v.weeklyCap * form.weeks * 1e4) / 1e4)}` : `Top up approval (${form.weeks} wk)`}</button>
+      ${f === "SOL" ? `<button class="btn btn-ghost" data-act="withdraw" ${busy || !(s.cacheSol?.balance) ? "disabled" : ""}>Withdraw SOL</button>` : ""}
       <button class="btn btn-ghost" data-act="convert" ${busy || !holdings.some((h) => h.amount > 0) ? "disabled" : ""}>Convert all to USDC</button>
       <button class="btn btn-danger" data-act="stop" ${busy ? "disabled" : ""}>Stop Cache</button>
     </div>
+    ${withdrawPct !== null && f === "SOL" ? `<div class="field"><span class="flabel" id="wdLbl">Unwrap from your Cache SOL account (${sol(s.cacheSol?.balance ?? 0)})</span>
+      <div class="seg" role="group" aria-labelledby="wdLbl" style="max-width:360px">${[25, 50, 100].map((p) => `<button data-act="withdraw-pct" data-p="${p}" aria-pressed="${withdrawPct === p}">${p === 100 ? "All" : p + "%"}</button>`).join("")}</div>
+      <p class="dim" style="font-size:13px">Returns ${withdrawPct ? `<b class="mono" style="color:var(--fg)">${sol(((s.cacheSol?.balance ?? 0) * withdrawPct) / 100)}</b>` : "it"} to your normal SOL balance. Cache keeps running; sweeps use whatever is left, and you can add SOL again anytime.</p>
+      <div class="row"><button class="btn btn-ghost" data-act="cancel-withdraw">Cancel</button><button class="btn btn-primary" data-act="confirm-withdraw" ${busy || !withdrawPct ? "disabled" : ""}>Unwrap to wallet</button></div></div>` : ""}
     ${convert ? `<div class="summary">
       ${convert.legs.map((l) => `<div><span>${esc(l.symbol)}</span><b>${
         l.status === "converted" ? `<a href="${solscan(l.tx!)}" target="_blank" rel="noopener" style="color:var(--good)">Converted ≈ ${money(l.usdcOut ?? 0)}</a>`
@@ -555,6 +576,10 @@ document.addEventListener("click", (e) => {
   if (act === "topup") return void run(topUp);
   if (act === "sweep") return void run(sweepNow);
   if (act === "convert") return void run(() => previewConvert());
+  if (act === "withdraw") { withdrawPct = 0; return render(); }
+  if (act === "withdraw-pct") { withdrawPct = Number(b.dataset.p); return render(); }
+  if (act === "cancel-withdraw") { withdrawPct = null; return render(); }
+  if (act === "confirm-withdraw") return void run(withdrawSol);
   if (act === "cancel-convert") { convert = null; return render(); }
   if (act === "confirm-convert") return void run(confirmConvert);
   if (act === "stop") {

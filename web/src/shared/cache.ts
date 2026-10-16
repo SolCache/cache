@@ -292,6 +292,37 @@ export async function createCacheSolAccountIxs(owner: PublicKey, lamports: bigin
   ];
 }
 
+/** Unwraps `lamports` from the Cache SOL account back to the owner's normal SOL in one transaction:
+ *  a temporary wrapped-SOL account receives the amount and is closed straight away. The Cache SOL
+ *  account itself stays open, so the vault keeps working and can be topped up again. */
+export async function withdrawFromCacheSolIxs(owner: PublicKey, lamports: bigint, rentLamports: number) {
+  const account = await cacheSolAccount(owner);
+  const tmp = await PublicKey.createWithSeed(owner, "cache-sol-tmp", TOKEN_PROGRAM_ID);
+  const amount = new Uint8Array(8);
+  new DataView(amount.buffer).setBigUint64(0, lamports, true);
+  return [
+    SystemProgram.createAccountWithSeed({
+      fromPubkey: owner, newAccountPubkey: tmp, basePubkey: owner, seed: "cache-sol-tmp",
+      lamports: rentLamports, space: 165, programId: TOKEN_PROGRAM_ID,
+    }),
+    new TransactionInstruction({
+      programId: TOKEN_PROGRAM_ID,
+      keys: [{ pubkey: tmp, isSigner: false, isWritable: true }, { pubkey: WSOL_MINT, isSigner: false, isWritable: false }],
+      data: buf([18, ...owner.toBytes()]),
+    }),
+    new TransactionInstruction({
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: account, isSigner: false, isWritable: true },
+        { pubkey: tmp, isSigner: false, isWritable: true },
+        { pubkey: owner, isSigner: true, isWritable: false },
+      ],
+      data: buf([3, ...amount]),
+    }),
+    closeTokenAccountIx(tmp, owner, owner),
+  ];
+}
+
 /** Moves more SOL into the Cache SOL account and syncs its wrapped balance. */
 export async function addToCacheSolIxs(owner: PublicKey, lamports: bigint) {
   const account = await cacheSolAccount(owner);
