@@ -188,7 +188,7 @@ async function reconcileSent(env: Env, wallet: string) {
     const s = r.value?.[i];
     if (s?.err) await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = 'Transaction failed onchain' WHERE id = ?").bind(rows[i].id).run();
     else if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(rows[i].id).run();
-    else if (!s && ((rows[i].lvbh && height > rows[i].lvbh) || now() - rows[i].ts > 180)) {
+    else if (!s && (((rows[i].lvbh ?? 0) > 0 && height > (rows[i].lvbh ?? 0)) || now() - rows[i].ts > 180)) {
       await env.DB.prepare("UPDATE sweeps SET status = 'expired', error = 'Dropped by the network before it landed. Nothing moved; these round-ups go into the next sweep.' WHERE id = ?").bind(rows[i].id).run();
     }
   }
