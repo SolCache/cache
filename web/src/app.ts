@@ -410,7 +410,7 @@ function setupView() {
   const total = cap * form.weeks;
   const shortfall = f === "SOL" && !isEdit ? solShortfall() : 0;
   return `<section class="card stack">
-    <div><span class="pixel" style="color:var(--teal)">${isEdit ? "Edit settings" : "Set up Cache"}</span>
+    <div><span class="pixel" style="color:var(--accent)">${isEdit ? "Edit settings" : "Set up Cache"}</span>
     <h2 style="margin-top:6px">${isEdit ? "Change how Cache works for you" : "A few choices, one signature"}</h2></div>
 
     <div class="field"><span class="flabel" id="fundLbl">Invest round-ups from</span>
@@ -512,7 +512,7 @@ function dashboardView() {
   <section class="card stack">
     <h3>Round-ups</h3>
     <div class="table-wrap">${s.trades.length ? `<table><thead><tr><th>When</th><th>Trade</th><th>App</th><th style="text-align:right">Value</th><th style="text-align:right">Round-up</th></tr></thead><tbody>
-      ${s.trades.map((t) => `<tr><td>${when(t.ts)}</td><td class="desc"><a href="${solscan(t.sig)}" target="_blank" rel="noopener">${esc(t.description || "Swap")}</a></td><td>${esc(t.source || "")}</td><td class="num">${money(t.value_usd)}</td><td class="num" style="color:var(--teal)">+${money(t.roundup_usd)}</td></tr>`).join("")}
+      ${s.trades.map((t) => `<tr><td>${when(t.ts)}</td><td class="desc"><a href="${solscan(t.sig)}" target="_blank" rel="noopener">${esc(t.description || "Swap")}</a></td><td>${esc(t.source || "")}</td><td class="num">${money(t.value_usd)}</td><td class="num" style="color:var(--accent)">+${money(t.roundup_usd)}</td></tr>`).join("")}
     </tbody></table>` : `<div class="empty">No round-ups yet. Make a swap from this wallet on any app; it shows up here within about 15 minutes, or right away when you reload this page.</div>`}</div>
   </section>
 

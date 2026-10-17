@@ -2,17 +2,17 @@
   <title>Cache</title>
   <defs>
     <linearGradient id="top" gradientUnits="userSpaceOnUse" x1="10" y1="12" x2="54" y2="32">
-      <stop offset="0" stop-color="#22F2CC"/><stop offset="0.55" stop-color="#3D7CFF"/><stop offset="1" stop-color="#9B4DFF"/>
+      <stop offset="0" stop-color="#18F5C8"/><stop offset="0.55" stop-color="#2C7BFF"/><stop offset="1" stop-color="#9450FF"/>
     </linearGradient>
     <linearGradient id="side" gradientUnits="userSpaceOnUse" x1="10" y1="26" x2="54" y2="26">
-      <stop offset="0" stop-color="#0E8C78"/><stop offset="0.5" stop-color="#1F47A8"/><stop offset="1" stop-color="#5A2BA8"/>
+      <stop offset="0" stop-color="#10A089"/><stop offset="0.5" stop-color="#0E4DB8"/><stop offset="1" stop-color="#5A2BB0"/>
     </linearGradient>
   </defs>
   <g stroke-linejoin="round" stroke-width="1.5">
-    <polygon points="32,26 54,37 32,48 10,37" fill="#E246F5" stroke="#E246F5"/>
-    <polygon points="10,37 32,48 54,37 54,42 32,53 10,42" fill="#7E1F8E" stroke="#7E1F8E"/>
-    <polygon points="32,18 54,29 32,40 10,29" fill="#9B4DFF" stroke="#9B4DFF"/>
-    <polygon points="10,29 32,40 54,29 54,34 32,45 10,34" fill="#4A2399" stroke="#4A2399"/>
+    <polygon points="32,26 54,37 32,48 10,37" fill="#F24BFF" stroke="#F24BFF"/>
+    <polygon points="10,37 32,48 54,37 54,42 32,53 10,42" fill="#8E22A8" stroke="#8E22A8"/>
+    <polygon points="32,18 54,29 32,40 10,29" fill="#A94BFF" stroke="#A94BFF"/>
+    <polygon points="10,29 32,40 54,29 54,34 32,45 10,34" fill="#5420A8" stroke="#5420A8"/>
     <polygon points="32,10 54,21 32,32 10,21" fill="url(#top)" stroke="url(#top)"/>
     <polygon points="10,21 32,32 54,21 54,26 32,37 10,26" fill="url(#side)" stroke="url(#side)"/>
   </g>
