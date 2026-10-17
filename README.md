@@ -6,8 +6,6 @@ Round-ups from every Solana trade, invested into xStocks (tokenized stocks), str
 
 **[solcache.app](https://solcache.app)** · **[Docs](https://solcache.app/docs)**
 
-> **Mainnet test of unaudited software.** Use a wallet with only a small amount in it. xStocks are not available to US persons.
-
 ## How it works
 
 | Piece | Where | What it does |

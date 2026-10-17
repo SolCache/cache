@@ -395,7 +395,6 @@ function connectView() {
     <h2>Connect your wallet</h2>
     <p class="muted" style="max-width:34em">Cache follows this address for swaps and sends the xStocks it buys back here. Your funds stay in your wallet until a sweep.</p>
     <div class="wallets">${list}</div>
-    <p class="note warn" style="max-width:34em;text-align:left">This is a mainnet test of unaudited software. Use a wallet with only a small amount of funds. xStocks aren't available to US persons.</p>
   </section>`;
 }
 
