@@ -192,6 +192,10 @@ button{font:inherit;color:inherit}
 .p-step .go{margin-top:auto;padding-top:8px;font-size:13.5px;font-weight:700;color:var(--fg)}
 .p-step .go::after{content:" ↗"}
 .p-arrow{display:grid;place-items:center;color:var(--dim);font-size:20px}
+.p-links{margin-top:auto;padding-top:8px;display:flex;flex-wrap:wrap;gap:6px 18px}
+.p-links .go{margin:0;padding:0;text-decoration:none}
+.p-links .go:hover{color:var(--accent)}
+div.p-step:hover{transform:none;border-color:var(--line-solid)}
 .proof-note{margin-top:16px;font-size:13px;color:var(--dim)}
 @media (max-width:860px){.proof{padding:20px}.proof-steps{grid-template-columns:1fr}.p-arrow{transform:rotate(90deg);height:18px}}
 
@@ -563,31 +567,31 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
       <div class="proof" aria-labelledby="proofTitle">
         <div class="proof-top">
           <h3 id="proofTitle"><span class="live">Live on mainnet</span> One real trade, start to finish</h3>
-          <a class="wallet-chip" href="https://solscan.io/account/AoaAdwbKH22L7vay6bfDoUpL9rqqddWrpaBaJDQsdaNw" target="_blank" rel="noopener"><span>Wallet</span>AoaA…daNw ↗</a>
+          <a class="wallet-chip" href="https://solscan.io/account/HkozCKQgoXts8ToDU2LTKx8rpy3tm6RYWD5Hvaws45oQ" target="_blank" rel="noopener"><span>Wallet</span>Hkoz…45oQ ↗</a>
         </div>
         <div class="proof-steps">
-          <a class="p-step" href="https://solscan.io/tx/2YVPiRQypUJXaCMgV838HXPG6gP8AtiWaRvos7Hg5g3sPjigHWokTLCT911gf9L2Ni1D3gqKU54zqFDsSyEQJCDC" target="_blank" rel="noopener">
-            <span class="lbl">1 · Swap</span>
-            <b>Bought $CODV</b>
-            <span class="sub">$10.61 on Jupiter · Oct 16, 20:17 UTC</span>
-            <span class="go">View the swap</span>
-          </a>
+          <div class="p-step">
+            <span class="lbl">1 · Trade</span>
+            <b>Bought and sold $GLING</b>
+            <span class="sub">Bought for $5.45, sold for $4.93 on Jupiter · Oct 18, 14:30 UTC</span>
+            <span class="p-links"><a class="go" href="https://solscan.io/tx/56HG2Ksky6ocAFA4g2VJaWaWT5qTht5ZPuFTdzMBrVrYJVmDzeuWk6tv1svjwtbkF4XoBHo16zFxJFr2nU5zFYAZ" target="_blank" rel="noopener">View the buy</a><a class="go" href="https://solscan.io/tx/2StnsSbfCtCxkzU2SVSvdA8xPWc9ebRKGL79ADJehLTrkiDAW3F3eM6jFaU9zsZqiZadZjUNXq3jb566URPgrZdD" target="_blank" rel="noopener">View the sell</a></span>
+          </div>
           <span class="p-arrow" aria-hidden="true">→</span>
-          <a class="p-step" href="https://solscan.io/tx/5LJpJQSJ9xThjtsgPKhugxLZAHmXVgZ2VQtaf2finYtthA9a4hV6qaC4UU6vGPhmwLugiw4CJ6pHYrepQDhn5DVG" target="_blank" rel="noopener">
+          <a class="p-step" href="https://solscan.io/tx/5qSAQ6f8y9zRcbzTicqMQaaotxUXzTcpeYqkTADj9AN9EftWbP4s9KqqWLm9hiwCv5VfcreJjhgE1VfwDFMT4Fuv" target="_blank" rel="noopener">
             <span class="lbl">2 · Round-up</span>
-            <b>+$0.78</b>
-            <span class="sub">$10.61 rounds up to $11.00, so $0.39 × 2x multiplier</span>
+            <b>+$0.62</b>
+            <span class="sub">$5.45 rounds up $0.55 and $4.93 rounds up $0.07, at 1x</span>
             <span class="go">View the sweep</span>
           </a>
           <span class="p-arrow" aria-hidden="true">→</span>
-          <a class="p-step" href="https://solscan.io/account/8uAN9MqdqpurA8qJv98457m41DfSFaMkpeMr8qxKBdB6" target="_blank" rel="noopener">
+          <a class="p-step" href="https://solscan.io/account/ED2KLWNxUkKqxmeqToL6u1acB3G9yzwXt682uBGzTC1i" target="_blank" rel="noopener">
             <span class="lbl">3 · Cached</span>
-            <b>0.00212 SPYx</b>
-            <span class="sub">S&amp;P 500 xStock, delivered to the wallet 82 seconds later</span>
+            <b>0.0049 TSLAx</b>
+            <span class="sub">Tesla xStock, delivered to the wallet at 14:33 UTC</span>
             <span class="go">View the xStock</span>
           </a>
         </div>
-        <p class="proof-note">The round-up was swept with the wallet's other pending round-ups and split across four xStocks. Shown here is the S&amp;P 500 leg.</p>
+        <p class="proof-note">The same sweep also carried a $LEPEN round trip the wallet made two minutes later: $1.71 of USDC round-ups in total, all into TSLAx.</p>
       </div>
 
       <div class="features">
