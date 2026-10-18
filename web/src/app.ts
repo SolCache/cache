@@ -1,6 +1,7 @@
 import { PublicKey, TransactionInstruction, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
 import {
-  addToCacheSolIxs, withdrawFromCacheSolIxs, approveIx, ata, cacheSolAccount, closeTokenAccountIx, closeVaultIx, createAtaIdempotentIx,
+  addToCacheSolIxs, withdrawFromCacheSolIxs, approveIx, ata, cacheSolAccount, closeTokenAccountIx, closeVaultIx, computeUnitLimitIx, createAtaIdempotentIx,
+  loadedAccountsDataSizeLimitIx,
   createCacheSolAccountIxs, initializeVaultIx, MAX_PICKS, MULTIPLIERS, revokeIx, SOL_DECIMALS, STOCKS, stockByMint,
   toUnits, TOKEN_PROGRAM_ID, updateVaultIx, USDC_DECIMALS, USDC_MINT, vaultPda,
 } from "./shared/cache";
@@ -98,20 +99,57 @@ async function disconnect() {
   render();
 }
 
+const b64 = (bytes: Uint8Array) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
+
+type SimResult = { err: unknown; logs?: string[] | null; unitsConsumed?: number; loadedAccountsDataSize?: number };
+
+/** Simulate an unsigned transaction (Phantom's guidance: sigVerify off, before asking the wallet to sign). */
+async function simulate(tx: VersionedTransaction): Promise<SimResult> {
+  const r = await rpc("simulateTransaction", [b64(tx.serialize()), { encoding: "base64", sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" }]);
+  return r.value as SimResult;
+}
+
+function simError(label: string, sim: SimResult) {
+  const logs = (sim.logs ?? []).join("\n");
+  const msg = /insufficient (funds|lamports)/i.test(logs) ? "not enough balance to cover it"
+    : (logs.match(/Error Message: ([^.\n]+)/)?.[1] ?? (typeof sim.err === "string" ? sim.err : JSON.stringify(sim.err)));
+  return new Error(`${label} would fail: ${msg}. Nothing was sent.`);
+}
+
+const MAX_UNITS = 1_400_000;
+const MAX_LOADED_BYTES = 64 * 1024 * 1024;
+
 async function send(ixs: TransactionInstruction[], label: string) {
   if (!provider || !owner) throw new Error("Connect a wallet first");
+  const payer = owner;
   const { value: bh } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
-  const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: bh.blockhash, instructions: ixs }).compileToV0Message();
-  const tx = new VersionedTransaction(msg);
-  toast(`${label}: approve it in your wallet…`);
-  let sig: string;
-  if (provider.signAndSendTransaction) {
-    const r = await provider.signAndSendTransaction(tx);
-    sig = typeof r === "string" ? r : r.signature;
-  } else {
-    const signed: VersionedTransaction = await provider.signTransaction(tx);
-    sig = await rpc("sendTransaction", [btoa(String.fromCharCode(...signed.serialize())), { encoding: "base64" }]);
+  const build = (list: TransactionInstruction[]) =>
+    new VersionedTransaction(new TransactionMessage({ payerKey: payer, recentBlockhash: bh.blockhash, instructions: list }).compileToV0Message());
+
+  // 1. Measure: simulate with the maximum compute budget.
+  toast(`${label}: preparing…`);
+  const probe = await simulate(build([computeUnitLimitIx(MAX_UNITS), ...ixs]));
+  if (probe.err) throw simError(label, probe);
+
+  // 2. Set explicit limits from the measurement, with headroom for the wallet's own safety checks.
+  const used = probe.unitsConsumed ?? 200_000;
+  const units = Math.min(MAX_UNITS, Math.max(Math.ceil(used * 1.3), used + 40_000));
+  const loaded = probe.loadedAccountsDataSize;
+  const bytes = Math.min(MAX_LOADED_BYTES, loaded ? Math.max(Math.ceil(loaded * 1.5), loaded + 2 * 1024 * 1024) : 8 * 1024 * 1024);
+  let tx = build([computeUnitLimitIx(units), loadedAccountsDataSizeLimitIx(bytes), ...ixs]);
+
+  // 3. Simulate the exact transaction the wallet will see.
+  let check = await simulate(tx);
+  if (check.err) {
+    tx = build([computeUnitLimitIx(units), ...ixs]);
+    check = await simulate(tx);
+    if (check.err) throw simError(label, check);
   }
+
+  // 4. The wallet only signs; we send through our own RPC with preflight on.
+  toast(`${label}: approve it in your wallet…`);
+  const signed: VersionedTransaction = await provider.signTransaction(tx);
+  const sig: string = await rpc("sendTransaction", [b64(signed.serialize()), { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 5 }]);
   toast(`${label}: confirming…`);
   for (let i = 0; i < 40; i++) {
     const r = await rpc("getSignatureStatuses", [[sig]]);
@@ -272,7 +310,14 @@ async function confirmConvert() {
   const r = await api<{ legs: SellLeg[] }>("/api/sell", { wallet: owner.toBase58(), build: true, mints: wanted });
   const results = new Map<string, SellLeg>(convert.legs.map((l) => [l.mint, { ...l }]));
   for (const l of r.legs) results.set(l.mint, { ...results.get(l.mint), ...l, status: l.tx ? "pending" : "failed", error: l.tx ? undefined : l.error });
-  const legs = r.legs.filter((l) => l.tx);
+  const built = r.legs.filter((l) => l.tx);
+  // Simulate each swap before asking for signatures; drop any that would fail.
+  const sims = await Promise.all(built.map((l) => simulate(VersionedTransaction.deserialize(Uint8Array.from(atob(l.tx!), (c) => c.charCodeAt(0)))).catch(() => null)));
+  const legs = built.filter((l, i) => {
+    const sim = sims[i];
+    if (sim && sim.err) { results.set(l.mint, { ...results.get(l.mint)!, status: "failed", error: simError("Swap", sim).message.replace(/^Swap would fail: /, "") }); return false; }
+    return true;
+  });
   if (legs.length) {
     const txs = legs.map((l) => VersionedTransaction.deserialize(Uint8Array.from(atob(l.tx!), (c) => c.charCodeAt(0))));
     toast(`Approve ${txs.length} swap${txs.length === 1 ? "" : "s"} in your wallet…`);
@@ -280,7 +325,7 @@ async function confirmConvert() {
     const sent: { mint: string; sig: string }[] = [];
     await Promise.all(signed.map(async (t, i) => {
       try {
-        const sig = await rpc("sendTransaction", [btoa(String.fromCharCode(...t.serialize())), { encoding: "base64", maxRetries: 5 }]);
+        const sig = await rpc("sendTransaction", [b64(t.serialize()), { encoding: "base64", skipPreflight: false, preflightCommitment: "confirmed", maxRetries: 5 }]);
         sent.push({ mint: legs[i].mint, sig });
       } catch (e) {
         results.set(legs[i].mint, { ...results.get(legs[i].mint)!, status: "failed", error: swapError(e) });

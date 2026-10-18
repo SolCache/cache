@@ -85,6 +85,19 @@ export function createAtaIdempotentIx(payer: PublicKey, owner: PublicKey, mint: 
   });
 }
 
+export const COMPUTE_BUDGET_PROGRAM_ID = new PublicKey("ComputeBudget111111111111111111111111111111");
+
+function u32Ix(tag: number, value: number) {
+  const data = new Uint8Array(5);
+  data[0] = tag;
+  new DataView(data.buffer).setUint32(1, value, true);
+  return new TransactionInstruction({ programId: COMPUTE_BUDGET_PROGRAM_ID, keys: [], data: buf(data) });
+}
+/** ComputeBudget `SetComputeUnitLimit` (instruction 2). */
+export const computeUnitLimitIx = (units: number) => u32Ix(2, units);
+/** ComputeBudget `SetLoadedAccountsDataSizeLimit` (instruction 4), in bytes. */
+export const loadedAccountsDataSizeLimitIx = (bytes: number) => u32Ix(4, bytes);
+
 /** SPL Token `Approve` (instruction 4): lets `delegate` move up to `amount` base units. */
 export function approveIx(account: PublicKey, delegate: PublicKey, owner: PublicKey, amount: bigint) {
   const data = new Uint8Array(9);
