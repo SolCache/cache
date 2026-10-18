@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cache | Legal</title>
+<meta name="description" content="Cache Terms of Use, Privacy Policy, Risk Disclosure, Eligibility and Accessibility.">
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#FFFFFF">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#FFFFFF; --bg-2:#F6F6FA; --surface:#FFFFFF; --surface-2:#EEEEF4;
+  --line:#0B0B1412; --line-solid:#E4E4EC;
+  --fg:#0B0B12; --muted:#52546A; --dim:#6B6D84; --accent:#5B34F0;
+  --teal:#22F2CC; --blue:#3D7CFF; --violet:#9B4DFF; --magenta:#E246F5; --warn:#F5B942;
+  --grad: linear-gradient(110deg, var(--teal) 0%, var(--blue) 48%, var(--violet) 78%, var(--magenta) 100%);
+  --grad-rev: linear-gradient(110deg, #E03CF0 0%, #8A44FF 30%, #3D6BFF 62%, #0EB8A2 100%);
+  --font: "Plus Jakarta Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:88px}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+a{color:inherit}
+h1,h2,h3{margin:0;letter-spacing:-0.025em;text-wrap:balance}
+p{margin:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px))}
+@media (min-width:760px){.wrap{padding-left:32px;padding-right:32px}}
+.tile{display:inline-block;background:url(/logo.svg) center/contain no-repeat;aspect-ratio:1/1}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.grad-text{background:var(--grad-rev);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:999px;font-weight:700;font-size:15px;padding:12px 22px;cursor:pointer;text-decoration:none;white-space:nowrap;transition:box-shadow .2s}
+.btn-primary{background:var(--fg);color:var(--bg)}
+.btn-primary:hover{box-shadow:0 0 0 4px #5B34F026, 0 10px 30px -10px #5B34F0}
+.btn-ghost{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1.5px var(--line-solid)}
+.btn-ghost:hover{box-shadow:inset 0 0 0 1.5px var(--muted)}
+.btn svg{width:18px;height:18px}
+
+.header{position:sticky;top:0;z-index:50;background:#FFFFFFD9;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.header .wrap{display:flex;align-items:center;gap:28px;height:68px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:800;font-size:22px;letter-spacing:-0.03em}
+.brand .tile{width:36px}
+.nav{display:flex;gap:26px;font-size:15px;font-weight:600;color:var(--muted)}
+.nav a{text-decoration:none}
+.nav a:hover,.nav a[aria-current="page"]{color:var(--fg)}
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:12px}
+@media (max-width:720px){.nav{display:none}.header-actions .btn-ghost span{display:none}.header-actions .btn-ghost{padding:12px}}
+
+.hero{border-bottom:1px solid var(--line-solid);background:url(/wash.jpg) center/cover no-repeat, var(--bg)}
+.hero .wrap{padding-block:72px 56px;display:flex;flex-direction:column;gap:18px}
+.hero h1{font-size:clamp(40px,6vw,68px);font-weight:800;line-height:1.02;letter-spacing:-0.04em}
+.hero p{color:var(--muted);font-size:clamp(17px,2vw,19px);max-width:38em}
+.hero .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+
+.layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:56px;padding-block:56px 96px}
+@media (max-width:960px){.layout{grid-template-columns:1fr;gap:0;padding-top:40px}}
+.toc{position:sticky;top:96px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14.5px}
+.toc b{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.toc a{text-decoration:none;color:var(--muted);padding:6px 0 6px 14px;border-left:2px solid var(--line-solid)}
+.toc a:hover{color:var(--fg);border-color:var(--muted)}
+@media (max-width:960px){.toc{display:none}}
+
+.doc{max-width:780px;display:flex;flex-direction:column;gap:64px}
+.doc section{display:flex;flex-direction:column;gap:16px}
+.doc h2{font-size:clamp(26px,3vw,32px);font-weight:800;line-height:1.15}
+.doc h3{font-size:18px;font-weight:700;margin-top:8px}
+.doc p,.doc li{color:#33354A}
+.doc strong{color:var(--fg)}
+.doc ul,.doc ol{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}
+.doc code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);border:1px solid var(--line-solid);border-radius:6px;padding:1px 6px;color:var(--fg)}
+
+.steps{list-style:none;padding:0!important;counter-reset:s;gap:12px!important}
+.steps li{counter-increment:s;display:grid;grid-template-columns:36px 1fr;gap:14px;padding:16px 18px;background:var(--surface);border:1px solid var(--line-solid);border-radius:16px}
+.steps li::before{content:counter(s);display:grid;place-items:center;width:36px;height:36px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line-solid);font-weight:800;color:var(--accent)}
+.steps b{display:block;color:var(--fg);margin-bottom:2px}
+
+.example{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.example{grid-template-columns:1fr}}
+.example div{padding:16px 18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.example span{display:block;font-size:13px;color:var(--muted)}
+.example b{font-family:var(--mono);font-size:22px;font-weight:500}
+
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.checks{grid-template-columns:1fr}}
+.checks div{padding:16px 18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.checks b{display:block;color:var(--fg);margin-bottom:4px}
+.checks p{font-size:14.5px;color:var(--muted)}
+
+.table{overflow-x:auto;border:1px solid var(--line-solid);border-radius:16px}
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line-solid);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);font-weight:700;background:var(--bg-2)}
+td{color:#33354A}
+td.addr a{font-family:var(--mono);font-size:13px;color:var(--fg);text-decoration:none;border-bottom:1px dotted var(--dim);word-break:break-all}
+td.addr a:hover{border-bottom-color:var(--accent)}
+
+.part{display:flex;flex-direction:column;gap:12px;padding-top:24px;border-top:1px solid var(--line-solid)}
+.part .eyebrow{margin:0}
+.part h2{font-size:clamp(30px,3.6vw,40px)}
+.code{margin:0;border-radius:16px;overflow:hidden;border:1px solid #1E1E2C;background:#0D0D16}
+.code figcaption{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #1E1E2C;font-size:12.5px;color:#A6A8BE}
+.code figcaption em{font-style:normal;font-family:var(--mono);font-size:11.5px;color:#7C7E96;text-transform:uppercase;letter-spacing:.06em}
+.code pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;color:#E6E7F2;tab-size:4}
+.code code{font-family:inherit;background:none;border:0;padding:0;color:inherit;font-size:inherit}
+.tk-k{color:#C792EA}.tk-t{color:#7FDBCA}.tk-s{color:#ECC48D}.tk-c{color:#7C7E96;font-style:italic}.tk-n{color:#F78C6C}.tk-m{color:#82AAFF}
+.arch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:760px){.arch{grid-template-columns:1fr}}
+.arch div{padding:18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.arch b{display:block;color:var(--fg);margin-bottom:2px}
+.arch span{display:block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.arch p{font-size:14.5px;color:var(--muted)}
+.flow{list-style:none;padding:0!important;gap:0!important;border:1px solid var(--line-solid);border-radius:16px;overflow:hidden}
+.flow li{display:grid;grid-template-columns:200px 1fr;gap:16px;padding:12px 16px;border-bottom:1px solid var(--line-solid);font-size:14.5px}
+.flow li:last-child{border-bottom:0}
+.flow li code{justify-self:start;white-space:nowrap}
+.flow li.key{background:#5B34F00A}
+@media (max-width:560px){.flow li{grid-template-columns:1fr;gap:4px}}
+td code{white-space:nowrap}
+.footer{border-top:1px solid var(--line-solid);background:var(--bg-2)}
+.footer .wrap{padding-block:32px calc(32px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;font-size:13.5px;color:var(--dim)}
+.footer nav{display:flex;gap:20px}
+.footer a{color:var(--muted);text-decoration:none}
+.footer a:hover{color:var(--fg)}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Cache home"><span class="tile" aria-hidden="true"></span>Cache</a>
+    <nav class="nav" aria-label="Main">
+      <a href="/">Home</a>
+      <a href="/docs">Docs</a>
+      <a href="/legal" aria-current="page">Legal</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-primary" href="/app">Open app</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <span class="eyebrow">Legal</span>
+      <h1>Terms, privacy and risks.</h1>
+      <p>Everything in one place, in plain language. Last updated October 18, 2026.</p>
+    </div>
+  </div>
+
+  <div class="wrap layout">
+    <nav class="toc" aria-label="On this page">
+      <b>On this page</b>
+      <a href="#terms">Terms of Use</a>
+      <a href="#privacy">Privacy Policy</a>
+      <a href="#risk">Risk Disclosure</a>
+      <a href="#eligibility">Eligibility</a>
+      <a href="#accessibility">Accessibility</a>
+    </nav>
+
+    <article class="doc">
+      <section id="terms">
+        <h2>Terms of Use</h2>
+        <p>By using solcache.app, the Cache app or the Cache program on Solana (together, "Cache"), you agree to these terms. If you don't agree, don't use Cache.</p>
+        <h3>What Cache is</h3>
+        <p>Cache is software. It reads the public activity of a wallet you connect, calculates round-ups, and, within the limits you approve onchain, swaps those round-ups into tokenized stocks that are delivered to your own wallet. Cache never takes custody of your funds or your keys. Every transaction that changes your settings is signed by you, in your wallet.</p>
+        <h3>No advice</h3>
+        <p>Cache is not a bank, broker-dealer, exchange or investment adviser. Nothing on this site or in the app is investment, financial, legal or tax advice. You decide what to buy, how much and when to stop.</p>
+        <h3>Your responsibilities</h3>
+        <ul>
+          <li>Keeping your wallet, seed phrase and devices secure. Cache can't recover lost keys or reverse transactions.</li>
+          <li>Making sure you're eligible to use Cache and to hold the assets it buys where you live.</li>
+          <li>Any taxes that apply to your trades, round-ups and holdings.</li>
+          <li>Reviewing every transaction your wallet asks you to sign.</li>
+        </ul>
+        <h3>Fees</h3>
+        <p>Cache doesn't charge a fee for round-ups or sweeps. Swaps carry the usual pool fees and price impact of the route used, and transactions you sign yourself carry the normal Solana network fee.</p>
+        <h3>Third parties</h3>
+        <p>Cache relies on services it doesn't control, including the Solana network, Jupiter for swap routing, RPC and data providers, wallet apps, and the third-party issuer of the tokenized stocks. Their availability, pricing and terms are their own.</p>
+        <h3>No warranty</h3>
+        <p>Cache is provided "as is" and "as available", without warranties of any kind. We don't promise that Cache will be uninterrupted, error-free or that any sweep will execute at a particular price or time.</p>
+        <h3>Limitation of liability</h3>
+        <p>To the fullest extent allowed by law, the people who build and maintain Cache aren't liable for any indirect, incidental or consequential loss, or for any loss of funds, profits or data, arising from your use of Cache, the Solana network or any third-party service.</p>
+        <h3>Changes and stopping</h3>
+        <p>We may update Cache and these terms. Continued use after an update means you accept it. You can stop at any time: pause, revoke the approval or use Stop Cache in the app, and your vault closes with its rent returned to you.</p>
+      </section>
+
+      <section id="privacy">
+        <h2>Privacy Policy</h2>
+        <p>Cache has no accounts. We don't ask for your name, email or phone number, and we don't sell data.</p>
+        <h3>What Cache uses</h3>
+        <ul>
+          <li><strong>Your public wallet address,</strong> to find your swaps and run your sweeps.</li>
+          <li><strong>Public blockchain data</strong> for that address: your swaps, their values and the round-ups calculated from them. This is stored so your dashboard and sweeps work.</li>
+          <li><strong>Your Cache settings,</strong> which live onchain in your vault, like anything else on Solana.</li>
+        </ul>
+        <h3>Services that see some data</h3>
+        <ul>
+          <li>Our hosting provider processes standard request data, such as your IP address and browser type, to serve and protect the site.</li>
+          <li>Blockchain data providers and Jupiter receive your wallet address when Cache looks up your activity or prepares a swap.</li>
+          <li>Fonts are loaded from Google Fonts, which receives your IP address when the page loads.</li>
+        </ul>
+        <h3>On your device</h3>
+        <p>The app remembers which wallet you last connected, and the site remembers that you've seen the intro, using your browser's storage. Cache doesn't use tracking or advertising cookies.</p>
+        <h3>Your choices</h3>
+        <p>Disconnect your wallet or stop Cache whenever you like. Data that's already on the Solana blockchain is public and can't be deleted by anyone.</p>
+      </section>
+
+      <section id="risk">
+        <h2>Risk Disclosure</h2>
+        <p>Using Cache involves real risk, including the loss of everything you put in. Only use amounts you can afford to lose.</p>
+        <ul>
+          <li><strong>Market risk.</strong> Stock prices and crypto prices go up and down. Past performance doesn't predict future results, and projections on this site are illustrative only.</li>
+          <li><strong>Tokenized stock risk.</strong> xStocks are issued by a third party and track the price of an underlying share or fund. They may not carry the same rights as the underlying asset, such as voting rights, and depend on the issuer and its custodians. Their price can differ from the underlying, especially when markets are closed or liquidity is thin.</li>
+          <li><strong>Smart contract and software risk.</strong> The Cache program, the app and the services they rely on may contain bugs or vulnerabilities, or behave in ways we don't expect.</li>
+          <li><strong>Approval risk.</strong> Cache works by you approving its vault to spend from one funding account, up to an amount you choose. The program limits how that approval can be used, but an approval is still permission to spend. Revoke it whenever you stop using Cache.</li>
+          <li><strong>Execution risk.</strong> Swaps are subject to slippage, price impact and route availability. Transactions can be delayed or dropped when the network is busy.</li>
+          <li><strong>Network risk.</strong> Solana and the services Cache uses can slow down, halt or change.</li>
+          <li><strong>Regulatory risk.</strong> Rules for crypto and tokenized securities differ by country and can change, which may affect your ability to use Cache or hold the assets it buys.</li>
+        </ul>
+      </section>
+
+      <section id="eligibility">
+        <h2>Eligibility</h2>
+        <ul>
+          <li>xStocks aren't available to persons in the United States or in other jurisdictions where their issuer restricts them. If that includes you, don't use Cache to buy them.</li>
+          <li>You must be of legal age and able to enter into these terms where you live.</li>
+          <li>You're responsible for making sure that using Cache, and holding the assets it buys, is legal for you.</li>
+        </ul>
+      </section>
+
+      <section id="accessibility">
+        <h2>Accessibility</h2>
+        <p>We want everyone to be able to use Cache. The site and app are built to work with a keyboard, use readable contrast, and respect your system's reduced-motion setting by skipping animations. If something gets in your way, tell us on <a href="https://x.com/Solcacheapp" target="_blank" rel="noopener">X</a> and we'll fix it.</p>
+      </section>
+    </article>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <span>© 2026 Cache · solcache.app</span>
+    <nav aria-label="Footer"><a href="/">Home</a><a href="/docs">Docs</a><a href="/app">App</a><a href="https://x.com/Solcacheapp" target="_blank" rel="noopener">X</a></nav>
+  </div>
+</footer>
+<script>
+/* Same-page links scroll without putting "#section" in the address bar. */
+(function(){
+  var smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function go(id, animate){
+    if (!id || id === 'top') { window.scrollTo({ top: 0, behavior: animate && smooth ? 'smooth' : 'auto' }); return; }
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: animate && smooth ? 'smooth' : 'auto', block: 'start' });
+  }
+  function clean(){ if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.target === '_blank') return;
+    var u; try { u = new URL(a.getAttribute('href'), location.href); } catch (_) { return; }
+    if (u.origin !== location.origin || u.pathname !== location.pathname || !u.hash) return;
+    e.preventDefault();
+    go(decodeURIComponent(u.hash.slice(1)), true);
+    clean();
+  });
+  if (location.hash) {
+    var id = decodeURIComponent(location.hash.slice(1));
+    clean();
+    window.addEventListener('load', function(){ go(id, false); });
+  }
+})();
+</script>
+</body>
+</html>

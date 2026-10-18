@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cache Docs</title>
+<title>Cache | Docs</title>
 <meta name="description" content="How Cache works, what it can and can't touch in your wallet, the onchain addresses, and the open-source code.">
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
@@ -529,7 +529,7 @@ roundUpUsd(20.00, 1);   // 1.00</code></pre></figure>
 <footer class="footer">
   <div class="wrap">
     <span>© 2026 Cache · solcache.app</span>
-    <nav aria-label="Footer"><a href="/">Home</a><a href="/app">App</a><a href="https://x.com/Solcacheapp" target="_blank" rel="noopener">X</a></nav>
+    <nav aria-label="Footer"><a href="/">Home</a><a href="/app">App</a><a href="/legal">Legal</a><a href="https://x.com/Solcacheapp" target="_blank" rel="noopener">X</a></nav>
   </div>
 </footer>
 <script>
@@ -545,6 +545,32 @@ roundUpUsd(20.00, 1);   // 1.00</code></pre></figure>
     while((m=re.exec(src))){out+=plain(src.slice(i,m.index));var t=m[0];out+='<span class="'+((t[0]==='/'||t[0]==='#')?'tk-c':'tk-s')+'">'+esc(t)+'</span>';i=re.lastIndex;}
     out+=plain(src.slice(i)); el.innerHTML=out;
   });
+})();
+</script>
+<script>
+/* Same-page links scroll without putting "#section" in the address bar. */
+(function(){
+  var smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function go(id, animate){
+    if (!id || id === 'top') { window.scrollTo({ top: 0, behavior: animate && smooth ? 'smooth' : 'auto' }); return; }
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: animate && smooth ? 'smooth' : 'auto', block: 'start' });
+  }
+  function clean(){ if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.target === '_blank') return;
+    var u; try { u = new URL(a.getAttribute('href'), location.href); } catch (_) { return; }
+    if (u.origin !== location.origin || u.pathname !== location.pathname || !u.hash) return;
+    e.preventDefault();
+    go(decodeURIComponent(u.hash.slice(1)), true);
+    clean();
+  });
+  if (location.hash) {
+    var id = decodeURIComponent(location.hash.slice(1));
+    clean();
+    window.addEventListener('load', function(){ go(id, false); });
+  }
 })();
 </script>
 </body>

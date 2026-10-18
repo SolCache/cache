@@ -45,7 +45,7 @@
   --tile: url(/logo.svg);
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth}
+html{scroll-behavior:smooth;scroll-padding-top:84px}
 @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:60;background:var(--bg)}
@@ -612,7 +612,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
 
       <div class="proof" aria-labelledby="proofTitle">
         <div class="proof-top">
-          <h3 id="proofTitle"><span class="live">Live on mainnet</span> One real trade, start to finish</h3>
+          <h3 id="proofTitle"><span class="live">Live on Solana</span> One real trade, start to finish</h3>
           <a class="wallet-chip" href="https://solscan.io/account/HkozCKQgoXts8ToDU2LTKx8rpy3tm6RYWD5Hvaws45oQ" target="_blank" rel="noopener"><span>Wallet</span>Hkoz…45oQ ↗</a>
         </div>
         <div class="proof-steps">
@@ -864,7 +864,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
         <details><summary>What does the approval let Cache do?</summary><p>It lets Cache spend USDC up to the weekly limit you set, and only to buy the xStocks you picked, delivered to your own wallet. It can't send funds anywhere else.</p></details>
         <details><summary>What are xStocks?</summary><p>xStocks are tokens issued by a third party that track the price of real stocks and ETFs, like Tesla or the S&amp;P 500. They aren't available in every country, including the United States, so check that you're eligible before you start.</p></details>
         <details><summary>How do I pause or stop?</summary><p>Pause round-ups in the app anytime. To stop for good, revoke the approval in Cache or directly in your wallet.</p></details>
-        <details><summary>What does it cost?</summary><p>Pricing will be announced before launch. Network fees for each weekly sweep are paid from the swept amount and are usually a fraction of a cent.</p></details>
+        <details><summary>What does it cost?</summary><p>Nothing. Cache is directly supported by $CACHE on pump.fun. Network fees for each sweep are covered by Cache and are usually a fraction of a cent. Maintenance is funded directly through creator rewards.</p></details>
       </div>
     </div>
   </section>
@@ -881,7 +881,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
       <div class="f-col"><h4 class="pixel">Learn</h4><ul><li><a href="/docs">Docs</a></li><li><a href="#faq">FAQ</a></li><li><a href="#how">Round-ups explained</a></li><li><a href="#security">Self-custody</a></li><li><a href="#faq">Eligibility</a></li></ul></div>
       <div class="f-col"><h4 class="pixel">Community</h4><ul><li><a href="https://x.com/Solcacheapp" target="_blank" rel="noopener">X</a></li></ul></div>
     </div>
-    <div class="f-legal"><a href="#top">Terms of Use</a><a href="#top">Privacy Policy</a><a href="#top">Risk Disclosure</a><a href="#top">Eligibility</a><a href="#top">Accessibility</a></div>
+    <div class="f-legal"><a href="/legal#terms">Terms of Use</a><a href="/legal#privacy">Privacy Policy</a><a href="/legal#risk">Risk Disclosure</a><a href="/legal#eligibility">Eligibility</a><a href="/legal#accessibility">Accessibility</a></div>
     <div class="disclosures">
       <p>Cache is software that automates purchases of tokenized stocks from your own Solana wallet. Cache is not a bank, broker-dealer or investment adviser and never takes custody of your assets. Nothing on this site is investment, legal or tax advice.</p>
       <p>xStocks are issued by a third party, not by Cache. They are not available to persons in the United States or in other restricted jurisdictions. Tokenized stocks may not carry the same rights as the underlying shares and can lose value, including all of it.</p>
@@ -1076,5 +1076,31 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
 })();
 </script>
 
+<script>
+/* Same-page links scroll without putting "#section" in the address bar. */
+(function(){
+  var smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function go(id, animate){
+    if (!id || id === 'top') { window.scrollTo({ top: 0, behavior: animate && smooth ? 'smooth' : 'auto' }); return; }
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: animate && smooth ? 'smooth' : 'auto', block: 'start' });
+  }
+  function clean(){ if (location.hash) history.replaceState(null, '', location.pathname + location.search); }
+  document.addEventListener('click', function(e){
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.target === '_blank') return;
+    var u; try { u = new URL(a.getAttribute('href'), location.href); } catch (_) { return; }
+    if (u.origin !== location.origin || u.pathname !== location.pathname || !u.hash) return;
+    e.preventDefault();
+    go(decodeURIComponent(u.hash.slice(1)), true);
+    clean();
+  });
+  if (location.hash) {
+    var id = decodeURIComponent(location.hash.slice(1));
+    clean();
+    window.addEventListener('load', function(){ go(id, false); });
+  }
+})();
+</script>
 </body>
 </html>
