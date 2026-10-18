@@ -104,10 +104,28 @@ td{color:#33354A}
 td.addr a{font-family:var(--mono);font-size:13px;color:var(--fg);text-decoration:none;border-bottom:1px dotted var(--dim);word-break:break-all}
 td.addr a:hover{border-bottom-color:var(--accent)}
 
-.repo{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;padding:24px;border-radius:20px;background:linear-gradient(var(--surface),var(--surface)) padding-box, var(--grad) border-box;border:1.5px solid transparent}
-.repo .name{font-family:var(--mono);font-size:17px;color:var(--fg)}
-.repo p{color:var(--muted);font-size:14.5px;margin-top:4px}
-
+.part{display:flex;flex-direction:column;gap:12px;padding-top:24px;border-top:1px solid var(--line-solid)}
+.part .eyebrow{margin:0}
+.part h2{font-size:clamp(30px,3.6vw,40px)}
+.code{margin:0;border-radius:16px;overflow:hidden;border:1px solid #1E1E2C;background:#0D0D16}
+.code figcaption{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid #1E1E2C;font-size:12.5px;color:#A6A8BE}
+.code figcaption em{font-style:normal;font-family:var(--mono);font-size:11.5px;color:#7C7E96;text-transform:uppercase;letter-spacing:.06em}
+.code pre{margin:0;padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.65;color:#E6E7F2;tab-size:4}
+.code code{font-family:inherit;background:none;border:0;padding:0;color:inherit;font-size:inherit}
+.tk-k{color:#C792EA}.tk-t{color:#7FDBCA}.tk-s{color:#ECC48D}.tk-c{color:#7C7E96;font-style:italic}.tk-n{color:#F78C6C}.tk-m{color:#82AAFF}
+.arch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:760px){.arch{grid-template-columns:1fr}}
+.arch div{padding:18px;border-radius:16px;background:var(--surface);border:1px solid var(--line-solid)}
+.arch b{display:block;color:var(--fg);margin-bottom:2px}
+.arch span{display:block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+.arch p{font-size:14.5px;color:var(--muted)}
+.flow{list-style:none;padding:0!important;gap:0!important;border:1px solid var(--line-solid);border-radius:16px;overflow:hidden}
+.flow li{display:grid;grid-template-columns:200px 1fr;gap:16px;padding:12px 16px;border-bottom:1px solid var(--line-solid);font-size:14.5px}
+.flow li:last-child{border-bottom:0}
+.flow li code{justify-self:start;white-space:nowrap}
+.flow li.key{background:#5B34F00A}
+@media (max-width:560px){.flow li{grid-template-columns:1fr;gap:4px}}
+td code{white-space:nowrap}
 .footer{border-top:1px solid var(--line-solid);background:var(--bg-2)}
 .footer .wrap{padding-block:32px calc(32px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px;font-size:13.5px;color:var(--dim)}
 .footer nav{display:flex;gap:20px}
@@ -122,10 +140,8 @@ td.addr a:hover{border-bottom-color:var(--accent)}
     <nav class="nav" aria-label="Main">
       <a href="/">Home</a>
       <a href="/docs" aria-current="page">Docs</a>
-      <a href="https://github.com/SolCache/cache" target="_blank" rel="noopener">GitHub</a>
     </nav>
     <div class="header-actions">
-      <a class="btn btn-ghost" href="https://github.com/SolCache/cache" target="_blank" rel="noopener" aria-label="Source code on GitHub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg><span>Source</span></a>
       <a class="btn btn-primary" href="/app">Open app</a>
     </div>
   </div>
@@ -136,10 +152,9 @@ td.addr a:hover{border-bottom-color:var(--accent)}
     <div class="wrap">
       <span class="eyebrow">Docs</span>
       <h1>How <span class="grad-text">Cache</span> works.</h1>
-      <p>What happens to your round-ups, exactly what Cache can and can't touch in your wallet, and where to check every piece of it yourself. All of the code is public.</p>
+      <p>What happens to your round-ups, exactly what Cache can and can't touch in your wallet, and how the onchain program enforces it.</p>
       <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/SolCache/cache" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg>View the code on GitHub</a>
-        <a class="btn btn-ghost" href="/app">Open the app</a>
+        <a class="btn btn-primary" href="/app">Open the app</a><a class="btn btn-ghost" href="#architecture">Under the hood</a>
       </div>
     </div>
   </div>
@@ -154,8 +169,18 @@ td.addr a:hover{border-bottom-color:var(--accent)}
       <a href="#safety">What Cache can touch</a>
       <a href="#control">Pausing, withdrawing, stopping</a>
       <a href="#fees">Fees</a>
+      <b style="margin-top:22px">Under the hood</b>
+      <a href="#architecture">Architecture</a>
+      <a href="#accounts">Accounts</a>
+      <a href="#instructions">Instructions</a>
+      <a href="#anatomy">Anatomy of a sweep</a>
+      <a href="#guard">The sweep guard</a>
+      <a href="#limit">Weekly limit</a>
+      <a href="#settle">Settlement and refunds</a>
+      <a href="#math">Round-up math</a>
+      <a href="#limits">Limits</a>
+      <a href="#errors">Error codes</a>
       <a href="#addresses">Onchain addresses</a>
-      <a href="#source">Source code</a>
     </nav>
 
     <article class="doc">
@@ -235,6 +260,238 @@ td.addr a:hover{border-bottom-color:var(--accent)}
         <p>Cache charges no fee. The keeper pays the network fees for sweeps. You pay the normal network fee on the transactions you sign yourself (setup, edits, withdrawals), and swaps carry the usual pool fees and price impact of the route Jupiter picks.</p>
       </section>
 
+
+      <section id="architecture" class="part">
+        <span class="eyebrow">Under the hood</span>
+        <h2>Architecture</h2>
+        <p>Cache has three parts. The program decides what is allowed. The keeper decides when and how much. The app is how you set it up and watch it work.</p>
+        <div class="arch">
+          <div><span>Onchain</span><b>Cache program</b><p>An Anchor program on Solana mainnet. Holds one config account and one vault per wallet, and checks every sweep before any funds move.</p></div>
+          <div><span>Offchain</span><b>Keeper</b><p>A service that indexes each wallet's swaps every 15 minutes, totals the round-ups, quotes routes through Jupiter and submits sweeps. It signs as the keeper, which is all it can do.</p></div>
+          <div><span>Client</span><b>App</b><p>Builds the setup, edit, withdraw and stop transactions in your browser. Your wallet signs them; the app never holds a key.</p></div>
+        </div>
+      </section>
+
+      <section id="accounts">
+        <h2>Accounts</h2>
+        <p>Every account Cache uses is derived deterministically, so anyone can find a wallet's vault from its address alone.</p>
+        <div class="table"><table>
+          <thead><tr><th scope="col">Account</th><th scope="col">Derivation</th><th scope="col">Holds</th></tr></thead>
+          <tbody>
+            <tr><td>Config</td><td><code>PDA ["config"]</code></td><td>Admin, keeper, swap program, USDC mint, xStock allowlist, global pause</td></tr>
+            <tr><td>Vault</td><td><code>PDA ["vault", owner]</code></td><td>Your settings, weekly window and in-flight sweep state</td></tr>
+            <tr><td>Cache SOL</td><td><code>createWithSeed(owner, "cache-sol-v1", Token)</code></td><td>Wrapped SOL you set aside for round-ups (SOL funding only)</td></tr>
+            <tr><td>Your xStocks</td><td><code>ATA(owner, mint)</code> · Token-2022</td><td>The stocks each sweep delivers</td></tr>
+          </tbody>
+        </table></div>
+        <figure class="code"><figcaption><span>Vault account layout</span><em>rust</em></figcaption><pre><code data-lang="rust">#[account]
+pub struct Vault {
+    pub owner: Pubkey,              // the wallet this vault belongs to
+    pub funding_mint: Pubkey,       // USDC or wrapped SOL
+    pub funding_account: Pubkey,    // the token account Cache may spend from
+    pub picks: Vec&lt;Pubkey&gt;,         // up to 5 xStock mints
+    pub weekly_cap: u64,            // in the funding token&#x27;s base units
+    pub multiplier: u16,            // 1, 2, 5, 10, 20, 50 or 100
+    pub paused: bool,
+    pub period_start: i64,          // start of the current 7-day window
+    pub spent_in_period: u64,
+    pub total_swept: u64,
+    pub sweep_count: u64,
+    // Set by begin_sweep, checked and cleared by end_sweep:
+    pub sweep_active: bool,
+    pub sweep_amount: u64,
+    pub sweep_min_out: u64,
+    pub sweep_dest: Pubkey,
+    pub sweep_dest_before: u64,
+    pub sweep_keeper_source: Pubkey,
+    pub sweep_keeper_source_before: u64,
+    pub bump: u8,
+    pub reserved: [u8; 64],         // room for future fields
+}</code></pre></figure>
+      </section>
+
+      <section id="instructions">
+        <h2>Instructions</h2>
+        <div class="table"><table>
+          <thead><tr><th scope="col">Instruction</th><th scope="col">Signer</th><th scope="col">What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>initialize_vault</code></td><td>You</td><td>Creates your vault with your picks, weekly limit, multiplier and funding account. Validates every setting onchain.</td></tr>
+            <tr><td><code>update_vault</code></td><td>You</td><td>Changes picks, limit or multiplier, or pauses and resumes.</td></tr>
+            <tr><td><code>close_vault</code></td><td>You</td><td>Closes the vault and returns its rent to you.</td></tr>
+            <tr><td><code>begin_sweep</code></td><td>Keeper</td><td>Checks the sweep, moves the round-up from your funding account and snapshots balances.</td></tr>
+            <tr><td><code>end_sweep</code></td><td>Keeper</td><td>Verifies the stock arrived, refunds anything unused and records the sweep.</td></tr>
+            <tr><td><code>init_config</code> · <code>update_config</code></td><td>Admin</td><td>Sets the keeper, swap program and allowlist. <code>init_config</code> only accepts the program's upgrade authority, so nobody can claim admin after a deploy.</td></tr>
+          </tbody>
+        </table></div>
+        <p>Approving and revoking the delegate are plain SPL Token instructions (<code>Approve</code>, <code>Revoke</code>) that your wallet signs alongside these.</p>
+      </section>
+
+      <section id="anatomy">
+        <h2>Anatomy of a sweep</h2>
+        <p>Each pick is swept in its own versioned transaction. Every instruction below lands atomically: if any check fails, the whole transaction reverts and nothing moves.</p>
+        <ol class="flow">
+          <li><code>ComputeBudget</code><span>Compute limit and priority fee.</span></li>
+          <li><code>ATA create</code><span>Creates your token account for the stock if you don't have one yet.</span></li>
+          <li class="key"><code>Cache · begin_sweep</code><span>Validates the sweep and pulls the round-up from your funding account.</span></li>
+          <li><code>Jupiter route</code><span>Swaps USDC or wrapped SOL into the xStock, delivered to your account.</span></li>
+          <li class="key"><code>Cache · end_sweep</code><span>Checks the minimum output, refunds leftovers, records and emits <code>SweepCompleted</code>.</span></li>
+        </ol>
+        <figure class="code"><figcaption><span>Splitting a sweep across picks (keeper)</span><em>typescript</em></figcaption><pre><code data-lang="typescript">// Split the sweep across picks; tiny amounts go to one pick, rotating each sweep.
+const n = amountUsd / picks.length &gt;= 0.5 ? picks.length : 1;
+const legs = Array.from({ length: n }, (_, i) =&gt; {
+  const mint = n === 1 ? picks[Number(vault.sweepCount % BigInt(picks.length))] : picks[i];
+  const units = i === n - 1 ? amount - (amount / BigInt(n)) * BigInt(n - 1) : amount / BigInt(n);
+  return { mint, units };
+});</code></pre></figure>
+      </section>
+
+      <section id="guard">
+        <h2>The sweep guard</h2>
+        <p><code>begin_sweep</code> reads the transaction's own instruction list from the instructions sysvar. It refuses to run if it was called from another program, if anything other than a swap, compute-budget or token-account instruction sits between it and <code>end_sweep</code>, or if <code>end_sweep</code> is missing. That's what stops a keeper from sneaking a transfer into the middle of a sweep.</p>
+        <figure class="code"><figcaption><span>Destination and pick checks</span><em>rust</em></figcaption><pre><code data-lang="rust">// begin_sweep: who may sweep, and into what
+require!(!vault.paused, CacheError::VaultPaused);
+require!(!vault.sweep_active, CacheError::SweepInProgress);
+require!(vault.picks.contains(&amp;dest.mint), CacheError::MintNotPicked);
+require!(config.allowed_mints.contains(&amp;dest.mint), CacheError::MintNotAllowed);
+require_keys_eq!(dest.owner, vault.owner, CacheError::WrongDestination);
+
+check_sandwich(&amp;ctx.accounts.instructions.to_account_info(), &amp;config.swap_program)?;</code></pre></figure>
+        <figure class="code"><figcaption><span>Instruction introspection</span><em>rust</em></figcaption><pre><code data-lang="rust">/// begin_sweep must be a top-level instruction followed, before any other Cache
+/// instruction, by at least one swap-program instruction and then end_sweep.
+/// Only compute-budget and associated-token instructions may sit in between.
+fn check_sandwich(ix_sysvar_account: &amp;AccountInfo, swap_program: &amp;Pubkey) -&gt; Result&lt;()&gt; {
+    let current = load_current_index_checked(ix_sysvar_account)? as usize;
+    let current_ix = load_instruction_at_checked(current, ix_sysvar_account)?;
+    require_keys_eq!(current_ix.program_id, crate::ID, CacheError::CpiNotAllowed);
+
+    let mut index = current + 1;
+    let mut saw_swap = false;
+    loop {
+        let ix = load_instruction_at_checked(index, ix_sysvar_account)
+            .map_err(|_| error!(CacheError::MissingEndSweep))?;
+        if ix.program_id == crate::ID {
+            require!(
+                ix.data.starts_with(crate::instruction::EndSweep::DISCRIMINATOR),
+                CacheError::InvalidSandwich
+            );
+            break;
+        }
+        if ix.program_id == *swap_program {
+            saw_swap = true;
+        } else if ix.program_id != COMPUTE_BUDGET_PROGRAM_ID
+            &amp;&amp; ix.program_id != anchor_spl::associated_token::ID
+        {
+            return err!(CacheError::InvalidSandwich);
+        }
+        index += 1;
+    }
+    require!(saw_swap, CacheError::InvalidSandwich);
+    Ok(())
+}</code></pre></figure>
+      </section>
+
+      <section id="limit">
+        <h2>Weekly limit</h2>
+        <p>The limit is a rolling 7-day window stored in your vault. The window starts at the first sweep after the previous one expires, and every sweep is counted against it before the transfer happens. Funds move under the vault PDA's delegate approval, so the program can never spend more than you approved, and never from any other account.</p>
+        <figure class="code"><figcaption><span>begin_sweep: window and transfer</span><em>rust</em></figcaption><pre><code data-lang="rust">// Weekly cap, rolling from the first sweep of each period.
+let now = Clock::get()?.unix_timestamp;
+let (period_start, spent) = if now &gt;= vault.period_start.saturating_add(WEEK_SECONDS) {
+    (now, 0u64)
+} else {
+    (vault.period_start, vault.spent_in_period)
+};
+let new_spent = spent.checked_add(amount).ok_or(error!(CacheError::MathOverflow))?;
+require!(new_spent &lt;= vault.weekly_cap, CacheError::WeeklyCapExceeded);
+
+// Pull the funding token using the vault PDA&#x27;s delegate approval.
+let seeds: [&amp;[u8]; 3] = [b&quot;vault&quot;, owner.as_ref(), &amp;[vault.bump]];
+token::transfer(
+    CpiContext::new_with_signer(token_program, Transfer {
+        from: user_source,      // must equal vault.funding_account
+        to: keeper_source,      // keeper&#x27;s token account for the same mint
+        authority: vault,       // the PDA the user approved as delegate
+    }, &amp;[&amp;seeds[..]]),
+    amount,
+)?;</code></pre></figure>
+      </section>
+
+      <section id="settle">
+        <h2>Settlement and refunds</h2>
+        <p>Routes rarely use the exact input. <code>end_sweep</code> sends any unused amount straight back to your funding account in the same transaction and credits it back to your weekly window, then checks the keeper's balance is exactly where it started.</p>
+        <figure class="code"><figcaption><span>end_sweep</span><em>rust</em></figcaption><pre><code data-lang="rust">pub fn end_sweep(ctx: Context&lt;EndSweep&gt;) -&gt; Result&lt;()&gt; {
+    require!(ctx.accounts.vault.sweep_active, CacheError::NoSweepInProgress);
+
+    // 1. The user must have received at least the quoted minimum.
+    let gained = ctx.accounts.dest.amount
+        .checked_sub(ctx.accounts.vault.sweep_dest_before)
+        .ok_or(error!(CacheError::SlippageExceeded))?;
+    require!(gained &gt;= ctx.accounts.vault.sweep_min_out, CacheError::SlippageExceeded);
+
+    // 2. Whatever the route didn&#x27;t use goes back to the user, in this same transaction.
+    let before = ctx.accounts.vault.sweep_keeper_source_before;
+    let leftover = ctx.accounts.keeper_source.amount.saturating_sub(before);
+    require!(leftover &lt;= ctx.accounts.vault.sweep_amount, CacheError::KeeperKeptFunds);
+    if leftover &gt; 0 {
+        token::transfer(/* keeper_source -&gt; user_source */, leftover)?;
+        ctx.accounts.keeper_source.reload()?;
+    }
+
+    // 3. The keeper must end exactly where it started.
+    require!(ctx.accounts.keeper_source.amount &lt;= before, CacheError::KeeperKeptFunds);
+
+    // 4. Record the sweep and emit an event.
+    let vault = &amp;mut ctx.accounts.vault;
+    vault.spent_in_period = vault.spent_in_period.saturating_sub(leftover);
+    vault.total_swept += amount - leftover;
+    vault.sweep_count += 1;
+    vault.sweep_active = false;
+    emit!(SweepCompleted { owner, funding_mint, mint, amount_in, refunded: leftover, out_amount: gained });
+    Ok(())
+}</code></pre></figure>
+      </section>
+
+      <section id="math">
+        <h2>Round-up math</h2>
+        <p>Round-ups are computed off-chain from each swap's US dollar value, using the prices of the tokens that changed hands. Only transactions your wallet signed and paid for are counted, and swaps involving xStocks are skipped.</p>
+        <figure class="code"><figcaption><span>Round-up per swap</span><em>typescript</em></figcaption><pre><code data-lang="typescript">/** Round a swap&#x27;s dollar value up to the next whole dollar, then apply the multiplier. */
+export function roundUpUsd(valueUsd: number, multiplier: number) {
+  const cents = Math.round(valueUsd * 100);
+  let up = (100 - (cents % 100)) % 100;
+  if (up === 0) up = 100;          // an exact dollar still rounds up a full $1
+  return (up * multiplier) / 100;
+}
+
+roundUpUsd(47.60, 1);   // 0.40
+roundUpUsd(47.60, 5);   // 2.00
+roundUpUsd(20.00, 1);   // 1.00</code></pre></figure>
+      </section>
+
+      <section id="limits">
+        <h2>Limits</h2>
+        <div class="table"><table>
+          <thead><tr><th scope="col">Setting</th><th scope="col">Range</th></tr></thead>
+          <tbody>
+            <tr><td>Picks per vault</td><td>1 to 5 different stocks from the allowlist</td></tr>
+            <tr><td>Weekly limit, USDC</td><td>$1 to $100,000</td></tr>
+            <tr><td>Weekly limit, SOL</td><td>0.01 to 1,000 SOL</td></tr>
+            <tr><td>Multiplier</td><td>1x, 2x, 5x, 10x, 20x, 50x or 100x</td></tr>
+            <tr><td>Weekly window</td><td>604,800 seconds (7 days), rolling</td></tr>
+            <tr><td>Allowlist size</td><td>Up to 24 xStocks</td></tr>
+            <tr><td>Minimum sweep</td><td>$1 pending</td></tr>
+            <tr><td>Swap slippage</td><td>Up to 1% per sweep</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="errors">
+        <h2>Error codes</h2>
+        <p>If a sweep or setting is rejected, the transaction fails with one of these custom program errors. Explorers show them as <code>custom program error: 0x…</code>.</p>
+        <div class="table"><table>
+          <thead><tr><th scope="col">Code</th><th scope="col">Hex</th><th scope="col">Name</th><th scope="col">Meaning</th></tr></thead>
+          <tbody><tr><td><code>6000</code></td><td><code>0x1770</code></td><td><code>Unauthorized</code></td><td>Not authorized</td></tr><tr><td><code>6001</code></td><td><code>0x1771</code></td><td><code>TooManyMints</code></td><td>Too many allowed mints</td></tr><tr><td><code>6002</code></td><td><code>0x1772</code></td><td><code>InvalidPicks</code></td><td>Pick between 1 and 5 different allowed stocks</td></tr><tr><td><code>6003</code></td><td><code>0x1773</code></td><td><code>InvalidCap</code></td><td>Weekly cap is out of range</td></tr><tr><td><code>6004</code></td><td><code>0x1774</code></td><td><code>InvalidMultiplier</code></td><td>Multiplier must be 1, 2, 5, 10, 20, 50 or 100</td></tr><tr><td><code>6005</code></td><td><code>0x1775</code></td><td><code>ProgramPaused</code></td><td>Cache is paused</td></tr><tr><td><code>6006</code></td><td><code>0x1776</code></td><td><code>VaultPaused</code></td><td>This vault is paused</td></tr><tr><td><code>6007</code></td><td><code>0x1777</code></td><td><code>SweepInProgress</code></td><td>A sweep is already in progress</td></tr><tr><td><code>6008</code></td><td><code>0x1778</code></td><td><code>NoSweepInProgress</code></td><td>No sweep in progress</td></tr><tr><td><code>6009</code></td><td><code>0x1779</code></td><td><code>InvalidAmount</code></td><td>Amount and minimum output must be greater than zero</td></tr><tr><td><code>6010</code></td><td><code>0x177a</code></td><td><code>MintNotPicked</code></td><td>This stock is not one of the user&#x27;s picks</td></tr><tr><td><code>6011</code></td><td><code>0x177b</code></td><td><code>MintNotAllowed</code></td><td>This stock is not on the allowlist</td></tr><tr><td><code>6012</code></td><td><code>0x177c</code></td><td><code>WrongDestination</code></td><td>Destination must be the user&#x27;s own token account</td></tr><tr><td><code>6013</code></td><td><code>0x177d</code></td><td><code>WrongSource</code></td><td>Source must be the vault&#x27;s funding account</td></tr><tr><td><code>6014</code></td><td><code>0x177e</code></td><td><code>WrongMint</code></td><td>Funding must be USDC or wrapped SOL</td></tr><tr><td><code>6015</code></td><td><code>0x177f</code></td><td><code>WeeklyCapExceeded</code></td><td>This sweep would exceed the weekly cap</td></tr><tr><td><code>6016</code></td><td><code>0x1780</code></td><td><code>SlippageExceeded</code></td><td>Received less than the minimum output</td></tr><tr><td><code>6017</code></td><td><code>0x1781</code></td><td><code>KeeperKeptFunds</code></td><td>Keeper kept part of the user&#x27;s funds</td></tr><tr><td><code>6018</code></td><td><code>0x1782</code></td><td><code>CpiNotAllowed</code></td><td>begin_sweep cannot be called from another program</td></tr><tr><td><code>6019</code></td><td><code>0x1783</code></td><td><code>MissingEndSweep</code></td><td>end_sweep must follow begin_sweep in the same transaction</td></tr><tr><td><code>6020</code></td><td><code>0x1784</code></td><td><code>InvalidSandwich</code></td><td>Only swap, compute-budget and token-account instructions may sit inside a sweep</td></tr><tr><td><code>6021</code></td><td><code>0x1785</code></td><td><code>MathOverflow</code></td><td>Math overflow</td></tr></tbody>
+        </table></div>
+      </section>
+
       <section id="addresses">
         <h2>Onchain addresses</h2>
         <p>Everything below runs on Solana mainnet. Each address opens on Solscan.</p>
@@ -265,18 +522,6 @@ td.addr a:hover{border-bottom-color:var(--accent)}
         </div>
         <p>The program is upgradeable. Solscan's program page shows the current upgrade authority.</p>
       </section>
-
-      <section id="source">
-        <h2>Source code</h2>
-        <p>Cache is open source. The program, the website, the app and the keeper all live in one public repository, and every deploy is built from it by GitHub Actions. The repository's build also runs the program against a local Solana validator before anything ships.</p>
-        <div class="repo">
-          <div>
-            <div class="name">SolCache/cache</div>
-            <p><code>programs/cache</code> onchain program (Anchor) · <code>web</code> site, app and keeper · <code>.github/workflows</code> build and deploy</p>
-          </div>
-          <a class="btn btn-primary" href="https://github.com/SolCache/cache" target="_blank" rel="noopener">Open on GitHub</a>
-        </div>
-      </section>
     </article>
   </div>
 </main>
@@ -284,8 +529,23 @@ td.addr a:hover{border-bottom-color:var(--accent)}
 <footer class="footer">
   <div class="wrap">
     <span>© 2026 Cache · solcache.app</span>
-    <nav aria-label="Footer"><a href="/">Home</a><a href="/app">App</a><a href="https://github.com/SolCache/cache" target="_blank" rel="noopener">GitHub</a></nav>
+    <nav aria-label="Footer"><a href="/">Home</a><a href="/app">App</a></nav>
   </div>
 </footer>
+<script>
+(function(){
+  var RK=/\b(pub|fn|let|mut|if|else|loop|return|struct|impl|use|const|break|as|true|false|export|function|while|for|const)\b/g;
+  var RT=/\b(Result|Pubkey|AccountInfo|Context|EndSweep|Vault|Vec|u8|u16|u64|i64|bool|BigInt|Number|Math|Array|CacheError|Transfer|CpiContext|Clock)\b/g;
+  var RM=/\b(require_keys_eq|require|err|error|emit|ok_or|map_err|starts_with|contains|checked_add|checked_sub|saturating_add|saturating_sub|load_current_index_checked|load_instruction_at_checked|check_sandwich|transfer|new_with_signer|reload|roundUpUsd|round|from)\b(?=!?\()/g;
+  document.querySelectorAll('pre code').forEach(function(el){
+    var src=el.textContent, out='', i=0;
+    var re=/(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#\[[^\]]*\]|"(?:[^"\\]|\\.)*"|b"(?:[^"\\]|\\.)*")/g, m;
+    function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+    function plain(t){t=esc(t);return t.replace(RM,'<span class="tk-m">$1</span>').replace(RK,'<span class="tk-k">$1</span>').replace(RT,'<span class="tk-t">$1</span>').replace(/\b(\d[\d_]*(?:\.\d+)?)\b/g,'<span class="tk-n">$1</span>');}
+    while((m=re.exec(src))){out+=plain(src.slice(i,m.index));var t=m[0];out+='<span class="'+((t[0]==='/'||t[0]==='#')?'tk-c':'tk-s')+'">'+esc(t)+'</span>';i=re.lastIndex;}
+    out+=plain(src.slice(i)); el.innerHTML=out;
+  });
+})();
+</script>
 </body>
 </html>
