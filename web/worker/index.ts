@@ -438,7 +438,42 @@ async function sweepWallet(env: Env, wallet: string) {
     alts: new Map(), fundingMint: vault.fundingMint, userSource: vault.fundingAccount,
   };
   for (const leg of legs) results.push(await sweepLeg(env, keeper, programId, owner, leg.mint, leg.units, leg.usd, ctx, false));
-  return { swept: results };
+  await settle(env, results);
+  return { swept: results.map(({ raw, id, ...r }) => r) };
+}
+
+/**
+ * Rebroadcasts in-flight sweeps until they land, fail or run out of budget.
+ * Resending the same signed transaction is safe: it has one signature, so it can only execute once.
+ * Bounded by a request budget so a sweep stays within the Worker's per-invocation subrequest limit;
+ * anything still in flight afterwards is settled by reconcileSent() on the next status read.
+ */
+async function settle(env: Env, results: any[]) {
+  const BUDGET = 16;
+  let calls = 0;
+  const inflight = results.filter((r) => r.status === "sent" && r.sig && r.raw);
+  for (let round = 0; round < 10; round++) {
+    const pending = inflight.filter((r) => r.status === "sent");
+    if (!pending.length || calls + 1 > BUDGET) break;
+    await new Promise((res) => setTimeout(res, 2000));
+    const st = (await rpc(env, "getSignatureStatuses", [pending.map((r) => r.sig)]).catch(() => null))?.value ?? [];
+    calls++;
+    for (let i = 0; i < pending.length; i++) {
+      const s = st[i];
+      if (s?.err) {
+        pending[i].status = "failed";
+        await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = 'Transaction failed onchain' WHERE id = ?").bind(pending[i].id).run();
+      } else if (s?.confirmationStatus === "confirmed" || s?.confirmationStatus === "finalized") {
+        pending[i].status = "confirmed";
+        await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(pending[i].id).run();
+      }
+    }
+    const still = pending.filter((r) => r.status === "sent");
+    if (still.length && calls + still.length <= BUDGET) {
+      await Promise.all(still.map((r) => rpc(env, "sendTransaction", [r.raw, { encoding: "base64", skipPreflight: true, maxRetries: 0 }]).catch(() => null)));
+      calls += still.length;
+    }
+  }
 }
 
 type SweepCtx = { blockhash: { blockhash: string; lastValidBlockHeight: number }; alts: Map<string, AddressLookupTableAccount>; fundingMint: PublicKey; userSource: PublicKey };
@@ -503,18 +538,8 @@ async function sweepLeg(env: Env, keeper: Keypair, programId: PublicKey, owner: 
     await env.DB.prepare("UPDATE sweeps SET sig = ?, status = 'sent', expected_out = ?, lvbh = ? WHERE id = ?")
       .bind(sig, quote.outAmount, ctx.blockhash.lastValidBlockHeight, id).run();
 
-    // One quick check; anything still in flight is settled by the next status read (the app polls after a sweep).
-    await new Promise((res) => setTimeout(res, 2500));
-    const st = (await rpc(env, "getSignatureStatuses", [[sig]])).value?.[0];
-    let status = "sent";
-    if (st?.err) {
-      status = "failed";
-      await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = 'Transaction failed onchain' WHERE id = ?").bind(id).run();
-    } else if (st?.confirmationStatus === "confirmed" || st?.confirmationStatus === "finalized") {
-      status = "confirmed";
-      await env.DB.prepare("UPDATE sweeps SET status = 'confirmed' WHERE id = ?").bind(id).run();
-    }
-    return { mint: mint.toBase58(), usd, sig, status };
+    // Landing is handled by settle(): it rebroadcasts this exact signed transaction until it lands or expires.
+    return { mint: mint.toBase58(), usd, sig, status: "sent", raw, id };
   } catch (e: any) {
     const message = explain((e?.message ?? String(e)).slice(0, 500));
     await env.DB.prepare("UPDATE sweeps SET status = 'failed', error = ? WHERE id = ?").bind(message, id).run();
