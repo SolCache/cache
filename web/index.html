@@ -8,6 +8,8 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#FFFFFF">
 <title>Cache</title>
+<script>try{if(sessionStorage.getItem('cacheIntro')||location.hash||matchMedia('(prefers-reduced-motion: reduce)').matches)document.documentElement.classList.add('no-intro');else document.documentElement.classList.add('intro-run')}catch(e){document.documentElement.classList.add('no-intro')}</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -198,6 +200,25 @@ button{font:inherit;color:inherit}
 div.p-step:hover{transform:none;border-color:var(--line-solid)}
 .proof-note{margin-top:16px;font-size:13px;color:var(--dim)}
 @media (max-width:860px){.proof{padding:20px}.proof-steps{grid-template-columns:1fr}.p-arrow{transform:rotate(90deg);height:18px}}
+
+/* Intro */
+.intro{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:url(/wash.jpg) center/cover no-repeat,#fff;transition:transform .75s cubic-bezier(.77,0,.18,1);will-change:transform;cursor:pointer}
+.no-intro .intro{display:none}
+.intro-run body{overflow:hidden}
+.intro.out{transform:translateX(-100%)}
+.intro-inner{display:flex;flex-direction:column;align-items:center;gap:18px;text-align:center;padding:24px}
+.intro-stack{position:relative;width:160px;height:157px}
+.intro-stack i{position:absolute;left:0;width:160px;aspect-ratio:46/29;background:center/contain no-repeat;opacity:0;transform:translateY(-90px);animation:introDrop .55s cubic-bezier(.34,1.45,.64,1) forwards;filter:drop-shadow(0 14px 18px #3D2A8A30)}
+.intro-stack i:nth-child(1){bottom:0;background-image:url(/slab-1.svg);animation-delay:.15s}
+.intro-stack i:nth-child(2){bottom:28px;background-image:url(/slab-2.svg);animation-delay:.45s}
+.intro-stack i:nth-child(3){bottom:56px;background-image:url(/slab-3.svg);animation-delay:.75s}
+@keyframes introDrop{to{opacity:1;transform:none}}
+.intro-word,.intro-tag{opacity:0;transform:translateY(10px);animation:introUp .5s ease forwards}
+.intro-word{font-family:var(--font-display);font-weight:800;font-size:clamp(40px,7vw,56px);letter-spacing:-0.04em;line-height:1;margin-top:6px;animation-delay:1.15s}
+.intro-tag{font-size:clamp(17px,2.4vw,21px);color:var(--muted);font-weight:500;animation-delay:1.35s}
+@keyframes introUp{to{opacity:1;transform:none}}
+.intro-skip{position:absolute;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));background:none;border:0;font:inherit;font-size:13px;font-weight:600;color:var(--dim);cursor:pointer;padding:8px}
+.intro-skip:hover{color:var(--fg)}
 
 /* Feature rows */
 .features{display:flex;flex-direction:column;gap:120px}
@@ -454,6 +475,31 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
 </style>
 </head>
 <body>
+<div class="intro" id="intro" aria-hidden="true">
+  <div class="intro-inner">
+    <div class="intro-stack"><i></i><i></i><i></i></div>
+    <div class="intro-word">Cache</div>
+    <p class="intro-tag">Your home for passive investing.</p>
+  </div>
+  <button class="intro-skip" type="button" tabindex="-1">Skip</button>
+</div>
+<script>
+(function(){
+  var root=document.documentElement, el=document.getElementById('intro');
+  if(!el) return;
+  if(!root.classList.contains('intro-run')){ el.remove(); return; }
+  try{ sessionStorage.setItem('cacheIntro','1'); }catch(e){}
+  var done=false;
+  function finish(){
+    if(done) return; done=true;
+    el.classList.add('out');
+    setTimeout(function(){ root.classList.remove('intro-run'); root.classList.add('no-intro'); el.remove(); }, 800);
+  }
+  var t=setTimeout(finish, 2700);
+  el.addEventListener('click', function(){ clearTimeout(t); finish(); });
+  window.addEventListener('keydown', function k(){ clearTimeout(t); finish(); window.removeEventListener('keydown', k); });
+})();
+</script>
 
 
 <div class="promo"><div class="wrap">Cache is live on Solana. <button type="button" data-open-onboarding>Open the app</button></div></div>
