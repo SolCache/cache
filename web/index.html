@@ -120,6 +120,13 @@ button{font:inherit;color:inherit}
 .hero-sub strong{color:var(--fg);font-weight:600}
 .hero-cta{display:flex;flex-wrap:wrap;align-items:center;gap:16px 20px}
 .hero-note{font-size:14px;color:var(--dim)}
+/* $CACHE contract address */
+.ca{display:inline-flex;align-items:center;gap:10px;max-width:100%;margin-top:22px;padding:6px 6px 6px 14px;border-radius:999px;background:#FFFFFFCC;box-shadow:inset 0 0 0 1px var(--line-solid);font-size:13px}
+.ca-label{font-weight:800;white-space:nowrap}
+.ca-addr{font-family:var(--font-mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ca-addr a{color:inherit;text-decoration:none}.ca-addr a:hover{color:var(--fg);text-decoration:underline}
+.ca-copy{flex:none;border:0;border-radius:999px;padding:6px 12px;background:var(--fg);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.ca-copy:hover{opacity:.85}
 .hero-visual{position:relative;display:flex;justify-content:center;min-width:0}
 .hero-visual .float-tile{position:absolute;width:190px;left:-30px;bottom:30px;filter:drop-shadow(0 30px 40px #9B4DFF40);animation:bob 6s ease-in-out infinite}
 .hero-visual .float-tile.small{width:96px;left:auto;right:-6px;top:40px;bottom:auto;animation-delay:-3s;filter:drop-shadow(0 18px 24px #22F2CC44)}
@@ -416,6 +423,8 @@ summary::-webkit-details-marker{display:none}
 summary::after{content:"+";font-family:var(--font-body);font-size:22px;font-weight:600;color:var(--accent);transition:transform .2s;flex:none}
 details[open] summary::after{transform:rotate(45deg)}
 details p{color:var(--muted);padding:0 0 22px;max-width:40em}
+details p code{font-family:var(--font-mono);font-size:.86em;color:var(--fg);word-break:break-all}
+details p a{color:var(--fg)}
 .support{margin-top:28px;padding:24px;border-radius:var(--r-md);background:var(--bg-2);border:1px solid var(--line-solid)}
 .support b{display:block;font-size:17px;margin-bottom:6px}
 .support p{color:var(--muted);font-size:15px}
@@ -547,6 +556,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
           <button class="btn btn-primary btn-lg" type="button" data-open-onboarding>Get started</button>
           <span class="hero-note">About two minutes. One signature.</span>
         </div>
+        <div class="ca" role="group" aria-label="$CACHE contract address"><span class="ca-label">$CACHE CA</span><span class="ca-addr"><a href="https://pump.fun/coin/FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump" target="_blank" rel="noopener" title="View $CACHE on pump.fun">FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump</a></span><button class="ca-copy" type="button" data-copy="FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump">Copy</button></div>
       </div>
       <div class="hero-visual">
         <div class="phone" role="img" aria-label="Cache app showing a balance of $1,284.62 and recent round-ups from swaps">
@@ -864,7 +874,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
         <details><summary>What does the approval let Cache do?</summary><p>It lets Cache spend USDC up to the weekly limit you set, and only to buy the xStocks you picked, delivered to your own wallet. It can't send funds anywhere else.</p></details>
         <details><summary>What are xStocks?</summary><p>xStocks are tokens issued by a third party that track the price of real stocks and ETFs, like Tesla or the S&amp;P 500. They aren't available in every country, including the United States, so check that you're eligible before you start.</p></details>
         <details><summary>How do I pause or stop?</summary><p>Pause round-ups in the app anytime. To stop for good, revoke the approval in Cache or directly in your wallet.</p></details>
-        <details><summary>What does it cost?</summary><p>Nothing. Cache is directly supported by $CACHE on pump.fun. Network fees for each sweep are covered by Cache and are usually a fraction of a cent. Maintenance is funded directly through creator rewards.</p></details>
+        <details><summary>What does it cost?</summary><p>Nothing. Cache is directly supported by <a href="https://pump.fun/coin/FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump" target="_blank" rel="noopener">$CACHE on pump.fun</a> (CA <code>FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump</code>). Network fees for each sweep are covered by Cache and are usually a fraction of a cent. Maintenance is funded directly through creator rewards.</p></details>
       </div>
     </div>
   </section>
@@ -879,7 +889,7 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
       </div>
       <div class="f-col"><h4 class="pixel">Product</h4><ul><li><a href="#how">How it works</a></li><li><a href="#xstocks">xStocks</a></li><li><a href="#security">Security</a></li><li><a href="#calc">Calculator</a></li></ul></div>
       <div class="f-col"><h4 class="pixel">Learn</h4><ul><li><a href="/docs">Docs</a></li><li><a href="#faq">FAQ</a></li><li><a href="#how">Round-ups explained</a></li><li><a href="#security">Self-custody</a></li><li><a href="#faq">Eligibility</a></li></ul></div>
-      <div class="f-col"><h4 class="pixel">Community</h4><ul><li><a href="https://x.com/CacheSolana" target="_blank" rel="noopener">X</a></li></ul></div>
+      <div class="f-col"><h4 class="pixel">Community</h4><ul><li><a href="https://x.com/CacheSolana" target="_blank" rel="noopener">X</a></li><li><a href="https://pump.fun/coin/FjADmnSL6EjnvL99EoURmkMQTqowseCnmj9unr9apump" target="_blank" rel="noopener">$CACHE on pump.fun</a></li></ul></div>
     </div>
     <div class="f-legal"><a href="/legal#terms">Terms of Use</a><a href="/legal#privacy">Privacy Policy</a><a href="/legal#risk">Risk Disclosure</a><a href="/legal#eligibility">Eligibility</a><a href="/legal#accessibility">Accessibility</a></div>
     <div class="disclosures">
@@ -1101,6 +1111,10 @@ dialog::backdrop{background:#0B0B1266;backdrop-filter:blur(6px)}
     window.addEventListener('load', function(){ go(id, false); });
   }
 })();
+</script>
+<script>
+document.addEventListener('click',function(e){var b=e.target.closest('[data-copy]');if(!b)return;var t=b.getAttribute('data-copy'),done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1600)};
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,function(){prompt('Copy the CA:',t)})}else{prompt('Copy the CA:',t)}});
 </script>
 </body>
 </html>
