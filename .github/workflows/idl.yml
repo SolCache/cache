@@ -1,0 +1,141 @@
+name: IDL
+
+# Publishes Cache's IDL (its instruction and account names) onchain so Solscan and
+# Solana Explorer label Cache transactions, e.g. "Cache: Begin Sweep".
+#
+# Every run first rehearses on a local validator loaded with the exact program binary that is
+# live on mainnet, and reports what publishing costs. That part is free.
+# Only when "publish" is ticked does it write the IDL to mainnet from the deployer wallet.
+# The program itself is never touched.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the IDL to mainnet (spends a little SOL from the deployer)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: idl
+  cancel-in-progress: false
+
+env:
+  SOLANA_VERSION: "2.1.21"
+  ANCHOR_VERSION: "0.31.1"
+  RPC_URL: https://mainnet.helius-rpc.com/?api-key=${{ secrets.HELIUS_API_KEY }}
+
+jobs:
+  idl:
+    name: IDL rehearsal${{ inputs.publish && ' and publish' || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.cache/solana
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/anchor
+            target
+          key: v2-sol-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-${{ hashFiles('programs/**/Cargo.toml') }}
+
+      - name: Install toolchains
+        run: |
+          if [ ! -x "$HOME/.local/share/solana/install/active_release/bin/solana" ]; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          fi
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          anchor --version 2>/dev/null | grep -q "${ANCHOR_VERSION}" || cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --locked --force
+          anchor --version
+
+      - name: Build the IDL
+        run: |
+          PROGRAM_ID=$(cat deploy/program-id.txt)
+          echo "PROGRAM_ID=$PROGRAM_ID" >> "$GITHUB_ENV"
+          grep -q "declare_id!(\"$PROGRAM_ID\")" programs/cache/src/lib.rs || { echo "::error::lib.rs does not declare $PROGRAM_ID"; exit 1; }
+          mkdir -p target/idl
+          anchor idl build -p cache -o target/idl/cache.json
+          python3 - <<'EOF'
+          import json, zlib
+          raw = open("target/idl/cache.json", "rb").read()
+          idl = json.loads(raw)
+          z = len(zlib.compress(json.dumps(idl, separators=(",", ":")).encode()))
+          ix = ", ".join(i["name"] for i in idl.get("instructions", []))
+          print(f"::notice title=IDL built::address {idl.get('address')} | {len(raw)} bytes, ~{z} compressed | instructions: {ix}")
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cache-idl
+          path: target/idl/cache.json
+
+      - name: Rehearse on a local validator with the live mainnet binary (free)
+        run: |
+          solana-keygen new --no-bip39-passphrase --silent --force -o /tmp/local-auth.json
+          AUTH=$(solana-keygen pubkey /tmp/local-auth.json)
+          solana program dump "$PROGRAM_ID" /tmp/mainnet.so --url "$RPC_URL"
+          echo "Mainnet binary: $(stat -c%s /tmp/mainnet.so) bytes, sha256 $(sha256sum /tmp/mainnet.so | cut -c1-16)…"
+          solana-test-validator --reset --quiet --ledger /tmp/ledger --mint "$AUTH" \
+            --upgradeable-program "$PROGRAM_ID" /tmp/mainnet.so "$AUTH" > /tmp/validator.log 2>&1 &
+          for i in $(seq 1 90); do solana cluster-version --url http://127.0.0.1:8899 > /dev/null 2>&1 && break; sleep 1; done
+          BEFORE=$(solana balance "$AUTH" --lamports --url http://127.0.0.1:8899 | grep -oE '^[0-9]+')
+          anchor idl init "$PROGRAM_ID" --filepath target/idl/cache.json \
+            --provider.cluster http://127.0.0.1:8899 --provider.wallet /tmp/local-auth.json
+          AFTER=$(solana balance "$AUTH" --lamports --url http://127.0.0.1:8899 | grep -oE '^[0-9]+')
+          anchor idl fetch "$PROGRAM_ID" --provider.cluster http://127.0.0.1:8899 -o /tmp/fetched.json
+          python3 -c 'import json,sys; a=json.load(open("target/idl/cache.json")); b=json.load(open("/tmp/fetched.json")); sys.exit(0 if a==b else "fetched IDL differs from the built one")'
+          COST=$((BEFORE - AFTER))
+          echo "COST_LAMPORTS=$COST" >> "$GITHUB_ENV"
+          echo "::notice title=Rehearsal passed::IDL written and read back on a local validator running the mainnet binary. Cost: $(awk -v l=$COST 'BEGIN{printf "%.6f", l/1e9}') SOL (account rent + fees)."
+
+      - name: Validator log
+        if: failure()
+        run: tail -60 /tmp/validator.log || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Mainnet status (read-only)
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund --silent
+          DEPLOYER=$(npx tsx scripts/deployer-key.ts)
+          solana config set --url "$RPC_URL" --keypair "$HOME/.config/solana/id.json" > /dev/null
+          BAL=$(solana balance --lamports | grep -oE '^[0-9]+')
+          echo "BAL_LAMPORTS=$BAL" >> "$GITHUB_ENV"
+          if anchor idl fetch "$PROGRAM_ID" --provider.cluster "$RPC_URL" -o /tmp/existing.json > /dev/null 2>&1; then
+            echo "IDL_EXISTS=true" >> "$GITHUB_ENV"; EXISTS="already published"
+          else
+            echo "IDL_EXISTS=false" >> "$GITHUB_ENV"; EXISTS="not published yet"
+          fi
+          SOL() { awk -v l="$1" 'BEGIN{printf "%.4f", l/1e9}'; }
+          echo "::notice title=Mainnet::Deployer ${DEPLOYER:0:4}…${DEPLOYER: -4} holds $(SOL $BAL) SOL. Publishing needs about $(SOL $COST_LAMPORTS) SOL plus priority fees. IDL is $EXISTS."
+
+      - name: Publish to mainnet (spends SOL)
+        if: ${{ inputs.publish }}
+        run: |
+          if [ "$IDL_EXISTS" = "true" ]; then
+            echo "::error::An IDL is already published. Nothing was sent."; exit 1
+          fi
+          NEED=$((COST_LAMPORTS + 10000000))
+          if [ "$BAL_LAMPORTS" -lt "$NEED" ]; then
+            echo "::error::Deployer needs $(awk -v l=$((NEED-BAL_LAMPORTS)) 'BEGIN{printf "%.4f", l/1e9}') more SOL. Nothing was sent."; exit 1
+          fi
+          anchor idl init "$PROGRAM_ID" --filepath target/idl/cache.json \
+            --provider.cluster "$RPC_URL" --provider.wallet "$HOME/.config/solana/id.json"
+          anchor idl fetch "$PROGRAM_ID" --provider.cluster "$RPC_URL" -o /tmp/published.json
+          python3 -c 'import json,sys; a=json.load(open("target/idl/cache.json")); b=json.load(open("/tmp/published.json")); sys.exit(0 if a==b else "published IDL differs from the built one")'
+          AFTER=$(solana balance --lamports | grep -oE '^[0-9]+')
+          echo "::notice title=Published::IDL is live on mainnet. Spent $(awk -v l=$((BAL_LAMPORTS-AFTER)) 'BEGIN{printf "%.6f", l/1e9}') SOL."
