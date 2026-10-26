@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Detach everything
         run: |
-          set -uo pipefail
+          set +e
           api() { # method path [json]
             if [ -n "${3:-}" ]; then
               curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "$3"
@@ -34,23 +34,35 @@ jobs:
               curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN"
             fi
           }
-          ok() { python3 -c 'import sys,json; r=json.load(sys.stdin); print("ok" if r.get("success") else "FAILED "+json.dumps(r.get("errors")))'; }
+          ok() { python3 -c 'import sys,json
+          raw=sys.stdin.read()
+          try:
+            r=json.loads(raw); print("ok" if r.get("success") else "FAILED "+json.dumps(r.get("errors")))
+          except Exception: print("FAILED "+raw[:200])'; }
+          ids() { python3 -c 'import sys,json
+          f=sys.argv[1]
+          try: r=json.load(sys.stdin)
+          except Exception: sys.exit(0)
+          if not r.get("success"): print("ERR", json.dumps(r.get("errors")), file=sys.stderr)
+          for d in r.get("result") or []:
+            if eval(f): print(d["id"])' "$1"; }
           LOG=""
 
           # 1. Custom domains on the worker
-          for id in $(api GET "/accounts/$CF_ACCOUNT/workers/domains" | python3 -c 'import sys,json; [print(d["id"]) for d in json.load(sys.stdin).get("result") or [] if d.get("service")=="'"$WORKER"'" or d.get("zone_name")=="'"$DOMAIN"'"]'); do
+          for id in $(api GET "/accounts/$CF_ACCOUNT/workers/domains" | ids 'd.get("service")=="'"$WORKER"'" or d.get("zone_name")=="'"$DOMAIN"'"'); do
             LOG="$LOG custom-domain:$(api DELETE "/accounts/$CF_ACCOUNT/workers/domains/$id" | ok)"
           done
 
-          ZONE=$(api GET "/zones?name=$DOMAIN" | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
+          ZONE=$(api GET "/zones?name=$DOMAIN" | ids 'True' | head -1)
+          echo "::notice title=Zone::${ZONE:-not found}"
 
           if [ -n "$ZONE" ]; then
             # 2. Worker routes in the zone
-            for id in $(api GET "/zones/$ZONE/workers/routes" | python3 -c 'import sys,json; [print(r["id"]) for r in json.load(sys.stdin).get("result") or []]'); do
+            for id in $(api GET "/zones/$ZONE/workers/routes" | ids 'True'); do
               LOG="$LOG route:$(api DELETE "/zones/$ZONE/workers/routes/$id" | ok)"
             done
             # 3. DNS records
-            for id in $(api GET "/zones/$ZONE/dns_records?per_page=500" | python3 -c 'import sys,json; [print(r["id"]) for r in json.load(sys.stdin).get("result") or []]'); do
+            for id in $(api GET "/zones/$ZONE/dns_records?per_page=500" | ids 'True'); do
               LOG="$LOG dns:$(api DELETE "/zones/$ZONE/dns_records/$id" | ok)"
             done
           fi
@@ -60,6 +72,7 @@ jobs:
           # 5. Cron off
           LOG="$LOG cron:$(api PUT "/accounts/$CF_ACCOUNT/workers/scripts/$WORKER/schedules" '[]' | ok)"
 
-          LEFT_DNS=$( [ -n "$ZONE" ] && api GET "/zones/$ZONE/dns_records" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("result") or []))' || echo "no zone")
-          LEFT_DOM=$(api GET "/accounts/$CF_ACCOUNT/workers/domains" | python3 -c 'import sys,json; print(len([d for d in json.load(sys.stdin).get("result") or [] if d.get("service")=="'"$WORKER"'"]))')
+          LEFT_DNS=$( [ -n "$ZONE" ] && api GET "/zones/$ZONE/dns_records" | ids 'True' | wc -l || echo "no zone")
+          LEFT_DOM=$(api GET "/accounts/$CF_ACCOUNT/workers/domains" | ids 'd.get("service")=="'"$WORKER"'"' | wc -l)
+          echo "::notice title=Takedown::"
           echo "::notice title=Takedown::$LOG | remaining DNS records: $LEFT_DNS | remaining custom domains: $LEFT_DOM"
