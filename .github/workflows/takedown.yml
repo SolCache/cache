@@ -1,0 +1,65 @@
+name: Take site down
+
+# Detaches solcache.app from the worker, deletes the zone's DNS records, turns off the
+# workers.dev URL and the cron. The worker script itself is left dormant (no routes, no URL,
+# no schedule) so its keeper secret is not destroyed. The Cloudflare zone is kept.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DOWN to take the site offline'
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  down:
+    if: ${{ inputs.confirm == 'DOWN' }}
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DOMAIN: solcache.app
+      WORKER: amber-otter-lantern
+    steps:
+      - name: Detach everything
+        run: |
+          set -uo pipefail
+          api() { # method path [json]
+            if [ -n "${3:-}" ]; then
+              curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" --data "$3"
+            else
+              curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" -H "Authorization: Bearer $CF_TOKEN"
+            fi
+          }
+          ok() { python3 -c 'import sys,json; r=json.load(sys.stdin); print("ok" if r.get("success") else "FAILED "+json.dumps(r.get("errors")))'; }
+          LOG=""
+
+          # 1. Custom domains on the worker
+          for id in $(api GET "/accounts/$CF_ACCOUNT/workers/domains" | python3 -c 'import sys,json; [print(d["id"]) for d in json.load(sys.stdin).get("result") or [] if d.get("service")=="'"$WORKER"'" or d.get("zone_name")=="'"$DOMAIN"'"]'); do
+            LOG="$LOG custom-domain:$(api DELETE "/accounts/$CF_ACCOUNT/workers/domains/$id" | ok)"
+          done
+
+          ZONE=$(api GET "/zones?name=$DOMAIN" | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
+
+          if [ -n "$ZONE" ]; then
+            # 2. Worker routes in the zone
+            for id in $(api GET "/zones/$ZONE/workers/routes" | python3 -c 'import sys,json; [print(r["id"]) for r in json.load(sys.stdin).get("result") or []]'); do
+              LOG="$LOG route:$(api DELETE "/zones/$ZONE/workers/routes/$id" | ok)"
+            done
+            # 3. DNS records
+            for id in $(api GET "/zones/$ZONE/dns_records?per_page=500" | python3 -c 'import sys,json; [print(r["id"]) for r in json.load(sys.stdin).get("result") or []]'); do
+              LOG="$LOG dns:$(api DELETE "/zones/$ZONE/dns_records/$id" | ok)"
+            done
+          fi
+
+          # 4. workers.dev URL off
+          LOG="$LOG workers.dev:$(api POST "/accounts/$CF_ACCOUNT/workers/scripts/$WORKER/subdomain" '{"enabled":false,"previews_enabled":false}' | ok)"
+          # 5. Cron off
+          LOG="$LOG cron:$(api PUT "/accounts/$CF_ACCOUNT/workers/scripts/$WORKER/schedules" '[]' | ok)"
+
+          LEFT_DNS=$( [ -n "$ZONE" ] && api GET "/zones/$ZONE/dns_records" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("result") or []))' || echo "no zone")
+          LEFT_DOM=$(api GET "/accounts/$CF_ACCOUNT/workers/domains" | python3 -c 'import sys,json; print(len([d for d in json.load(sys.stdin).get("result") or [] if d.get("service")=="'"$WORKER"'"]))')
+          echo "::notice title=Takedown::$LOG | remaining DNS records: $LEFT_DNS | remaining custom domains: $LEFT_DOM"
