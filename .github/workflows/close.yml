@@ -1,0 +1,76 @@
+name: Close program
+
+# Permanently closes the Cache program and returns its rent to the deployer wallet.
+# Closes the IDL account first (also refunds to the deployer). Cannot be undone.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CLOSE to permanently close the program'
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  SOLANA_VERSION: "2.1.21"
+  ANCHOR_VERSION: "0.31.1"
+  RPC_URL: https://mainnet.helius-rpc.com/?api-key=${{ secrets.HELIUS_API_KEY }}
+
+jobs:
+  close:
+    if: ${{ inputs.confirm == 'CLOSE' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/solana
+            ~/.cache/solana
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/anchor
+            target
+          key: v2-sol-${{ env.SOLANA_VERSION }}-anchor-${{ env.ANCHOR_VERSION }}-${{ hashFiles('programs/**/Cargo.toml') }}
+      - name: Install toolchains
+        run: |
+          if [ ! -x "$HOME/.local/share/solana/install/active_release/bin/solana" ]; then
+            sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
+          fi
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          anchor --version 2>/dev/null | grep -q "${ANCHOR_VERSION}" || cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --locked --force
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Deployer wallet
+        env:
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund --silent
+          DEPLOYER=$(npx tsx scripts/deployer-key.ts)
+          echo "DEPLOYER=$DEPLOYER" >> "$GITHUB_ENV"
+          echo "PROGRAM_ID=$(cat ../deploy/program-id.txt)" >> "$GITHUB_ENV"
+          solana config set --url "$RPC_URL" --keypair "$HOME/.config/solana/id.json" > /dev/null
+          echo "BEFORE=$(solana balance --lamports | grep -oE '^[0-9]+')" >> "$GITHUB_ENV"
+      - name: Close IDL account
+        run: |
+          if anchor idl fetch "$PROGRAM_ID" --provider.cluster "$RPC_URL" > /dev/null 2>&1; then
+            anchor idl close "$PROGRAM_ID" --provider.cluster "$RPC_URL" --provider.wallet "$HOME/.config/solana/id.json"
+          else
+            echo "No IDL account."
+          fi
+      - name: Close program
+        run: |
+          solana program close "$PROGRAM_ID" --recipient "$DEPLOYER" --bypass-warning
+      - name: Result
+        run: |
+          AFTER=$(solana balance --lamports | grep -oE '^[0-9]+')
+          SOL() { awk -v l="$1" 'BEGIN{printf "%.4f", l/1e9}'; }
+          echo "::notice title=Closed::Program closed. Recovered $(SOL $((AFTER - BEFORE))) SOL. Deployer ${DEPLOYER:0:4}…${DEPLOYER: -4} now holds $(SOL $AFTER) SOL."
+          solana program show "$PROGRAM_ID" 2>&1 | head -3 || true
